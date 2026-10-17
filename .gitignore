@@ -1,0 +1,10 @@
+/build/
+/out/
+/.vs/
+/.vscode/
+CMakeUserPresets.json
+
+# Simulation output when run from the repository root
+/res/
+/SpSIC.dat
+/Incident.dat

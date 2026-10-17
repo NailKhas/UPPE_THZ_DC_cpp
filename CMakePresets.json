@@ -1,0 +1,59 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "UPPE_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "mkl-windows-icx",
+      "inherits": "base",
+      "displayName": "Windows: Intel oneAPI icx + MKL (Ninja)",
+      "generator": "Ninja",
+      "cacheVariables": { "UPPE_BACKEND": "MKL", "CMAKE_CXX_COMPILER": "icx" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "mkl-windows-msvc",
+      "inherits": "base",
+      "displayName": "Windows: MSVC + MKL (Visual Studio 2022)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": { "value": "x64", "strategy": "set" },
+      "cacheVariables": { "UPPE_BACKEND": "MKL" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "mkl-linux",
+      "inherits": "base",
+      "displayName": "Linux: system compiler + MKL",
+      "generator": "Unix Makefiles",
+      "cacheVariables": { "UPPE_BACKEND": "MKL" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" }
+    },
+    {
+      "name": "fftw-openblas",
+      "inherits": "base",
+      "displayName": "GCC/Clang + FFTW3 + OpenBLAS",
+      "generator": "Unix Makefiles",
+      "cacheVariables": { "UPPE_BACKEND": "FFTW_OPENBLAS" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "mkl-windows-icx", "configurePreset": "mkl-windows-icx" },
+    { "name": "mkl-windows-msvc", "configurePreset": "mkl-windows-msvc", "configuration": "Release" },
+    { "name": "mkl-linux", "configurePreset": "mkl-linux" },
+    { "name": "fftw-openblas", "configurePreset": "fftw-openblas" }
+  ],
+  "testPresets": [
+    { "name": "mkl-windows-icx", "configurePreset": "mkl-windows-icx", "output": { "outputOnFailure": true } },
+    { "name": "mkl-windows-msvc", "configurePreset": "mkl-windows-msvc", "configuration": "Release", "output": { "outputOnFailure": true } },
+    { "name": "mkl-linux", "configurePreset": "mkl-linux", "output": { "outputOnFailure": true } },
+    { "name": "fftw-openblas", "configurePreset": "fftw-openblas", "output": { "outputOnFailure": true } }
+  ]
+}
