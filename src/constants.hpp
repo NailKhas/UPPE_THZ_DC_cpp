@@ -24,7 +24,12 @@ inline constexpr double Rmax = 20.0;
 #define UPPE_FOCUS_CM 20.0
 #endif
 inline constexpr double focus = UPPE_FOCUS_CM;
-inline constexpr double zsic = 18.0;
+// Start distance of the propagation (the first step), cm; -DUPPE_ZSIC_CM=<cm> (the Fortran value is 18).
+#ifndef UPPE_ZSIC_CM
+#define UPPE_ZSIC_CM 18.0
+#endif
+inline constexpr double zsic = UPPE_ZSIC_CM;
+static_assert(zsic < focus, "zsic must be less than focus");
 inline constexpr double t1 = 44.0e-15;
 inline constexpr double t0 = 54.0e-15;
 inline constexpr double t00 = 20.4e-15;

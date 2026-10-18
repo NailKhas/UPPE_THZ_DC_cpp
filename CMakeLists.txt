@@ -14,16 +14,22 @@ set_property(CACHE UPPE_BACKEND PROPERTY STRINGS MKL FFTW_OPENBLAS)
 option(UPPE_NATIVE "Optimize for the CPU of the build machine" ON)
 option(UPPE_BUILD_TESTS "Build unit tests" ON)
 set(UPPE_FOCUS_CM "20.0" CACHE STRING "Focal distance in cm (compile-time constant c::focus)")
-if(NOT UPPE_FOCUS_CM MATCHES "^[0-9]+(\\.[0-9]*)?$" OR UPPE_FOCUS_CM MATCHES "^0*(\\.0*)?$")
-  message(FATAL_ERROR "UPPE_FOCUS_CM must be a positive number, got '${UPPE_FOCUS_CM}'")
-endif()
-# The value is pasted into C++ as a double literal.
-if(NOT UPPE_FOCUS_CM MATCHES "\\.")
-  set(_uppe_focus_literal "${UPPE_FOCUS_CM}.0")
-else()
-  set(_uppe_focus_literal "${UPPE_FOCUS_CM}0")
-endif()
-message(STATUS "Focal distance: ${UPPE_FOCUS_CM} cm")
+set(UPPE_ZSIC_CM "18.0" CACHE STRING "Start distance of the propagation in cm (compile-time constant c::zsic)")
+
+# Checks that ${var} is a positive number and sets ${out} to it as a C++ double literal.
+function(uppe_double_literal var out)
+  set(v "${${var}}")
+  if(NOT v MATCHES "^[0-9]+(\\.[0-9]*)?$" OR v MATCHES "^0*(\\.0*)?$")
+    message(FATAL_ERROR "${var} must be a positive number, got '${v}'")
+  endif()
+  if(NOT v MATCHES "\\.")
+    set(v "${v}.")
+  endif()
+  set(${out} "${v}0" PARENT_SCOPE)
+endfunction()
+uppe_double_literal(UPPE_FOCUS_CM _uppe_focus_literal)
+uppe_double_literal(UPPE_ZSIC_CM _uppe_zsic_literal)
+message(STATUS "Focal distance: ${UPPE_FOCUS_CM} cm, start distance zsic: ${UPPE_ZSIC_CM} cm")
 
 find_package(OpenMP REQUIRED COMPONENTS CXX)
 
@@ -42,7 +48,7 @@ add_library(uppe_core STATIC
 )
 target_include_directories(uppe_core PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(uppe_core PUBLIC OpenMP::OpenMP_CXX)
-target_compile_definitions(uppe_core PUBLIC UPPE_FOCUS_CM=${_uppe_focus_literal})
+target_compile_definitions(uppe_core PUBLIC UPPE_FOCUS_CM=${_uppe_focus_literal} UPPE_ZSIC_CM=${_uppe_zsic_literal})
 
 # The port follows the Fortran operation order and IEEE semantics, so value-changing
 # floating-point optimizations (-ffast-math, /fp:fast, icx default -fp-model=fast) must stay off.

@@ -23,7 +23,7 @@ void write_checkpoint(const std::filesystem::path& file, const Sizes& sizes, con
                       const AlignedArray<cplx>& E_O, const AlignedArray<cplx>& E_T);
 
 // E_O and E_T must already have their production sizes. Throws if the file is damaged
-// or was written for other grid sizes or another focal distance.
+// or was written for other grid sizes or another focus or zsic.
 LoopState read_checkpoint(const std::filesystem::path& file, const Sizes& sizes, AlignedArray<cplx>& E_O,
                           AlignedArray<cplx>& E_T);
 

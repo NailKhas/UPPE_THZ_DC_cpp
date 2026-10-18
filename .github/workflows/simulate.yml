@@ -1,6 +1,6 @@
 name: Simulate
 
-run-name: "Simulate ${{ inputs.tag }}, segment ${{ inputs.segment }} (focus ${{ inputs.focus }} cm, z_max ${{ inputs.z_max }})"
+run-name: "Simulate ${{ inputs.tag }}, segment ${{ inputs.segment }} (focus ${{ inputs.focus }} cm, zsic ${{ inputs.zsic }} cm, z_max ${{ inputs.z_max }})"
 
 # One run is one segment of a chain. A segment stops itself before the job time limit or when the disk
 # is nearly full, saves a checkpoint as an artifact and dispatches the next segment, which resumes from it.
@@ -17,6 +17,10 @@ on:
         description: "Focal distance, cm (compiled in; pinned for the whole chain)"
         required: true
         default: "20"
+      zsic:
+        description: "Start distance of the propagation (the first step), cm, less than focus (compiled in)"
+        required: true
+        default: "18"
       tag:
         description: "Chain name (letters, digits, . _ -): release sim-<tag>, artifacts kw-<tag>-segNN"
         required: true
@@ -67,6 +71,7 @@ jobs:
       RESUME_RUN_ID: ${{ inputs.resume_run_id }}
       Z_MAX: ${{ inputs.z_max }}
       FOCUS: ${{ inputs.focus }}
+      ZSIC: ${{ inputs.zsic }}
       BUDGET: ${{ inputs.budget_minutes }}
       MAX_SEGMENTS: ${{ inputs.max_segments }}
       RUN_TESTS: ${{ inputs.run_tests }}
@@ -90,6 +95,8 @@ jobs:
           num='^[0-9]+(\.[0-9]+)?$'
           [ "$Z_MAX" = none ] || [[ "$Z_MAX" =~ $num ]] || { echo "::error::bad z_max '$Z_MAX'"; exit 1; }
           [[ "$FOCUS" =~ $num ]] || { echo "::error::bad focus '$FOCUS'"; exit 1; }
+          [[ "$ZSIC" =~ $num ]] || { echo "::error::bad zsic '$ZSIC'"; exit 1; }
+          awk -v a="$ZSIC" -v b="$FOCUS" 'BEGIN { exit !(a < b) }' || { echo "::error::zsic must be less than focus"; exit 1; }
           printf 'SEG2=%02d\n' "$SEGMENT" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v7
@@ -112,7 +119,7 @@ jobs:
           sudo apt-get install -y libfftw3-dev libopenblas-dev pigz
 
       - name: Configure
-        run: cmake --preset fftw-openblas -DUPPE_FOCUS_CM="$FOCUS"
+        run: cmake --preset fftw-openblas -DUPPE_FOCUS_CM="$FOCUS" -DUPPE_ZSIC_CM="$ZSIC"
 
       - name: Build
         run: cmake --build --preset fftw-openblas -j "$(nproc)"
@@ -130,7 +137,7 @@ jobs:
               exit 1
             fi
             gh release create "$RELEASE" --prerelease --target "$CODE_SHA" \
-              --title "Simulation $TAG (focus $FOCUS cm, z_max $Z_MAX)" \
+              --title "Simulation $TAG (focus $FOCUS cm, zsic $ZSIC cm, z_max $Z_MAX)" \
               --notes "Commit $CODE_SHA. Small result files are streamed here; kw_THz is in the artifacts kw-$TAG-segNN of every segment run."
           else
             prev=$(printf '%02d' $((SEGMENT - 1)))
@@ -216,7 +223,7 @@ jobs:
             exit 0
           fi
           gh workflow run simulate.yml --ref "$GITHUB_REF_NAME" \
-            -f z_max="$Z_MAX" -f focus="$FOCUS" -f tag="$TAG" -f segment="$next" -f resume_run_id="$GITHUB_RUN_ID" \
+            -f z_max="$Z_MAX" -f focus="$FOCUS" -f zsic="$ZSIC" -f tag="$TAG" -f segment="$next" -f resume_run_id="$GITHUB_RUN_ID" \
             -f code_sha="$CODE_SHA" -f budget_minutes="$BUDGET" -f max_segments="$MAX_SEGMENTS" -f run_tests="$RUN_TESTS"
           echo "Dispatched segment $next"
 

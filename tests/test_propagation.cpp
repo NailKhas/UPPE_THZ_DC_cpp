@@ -70,9 +70,10 @@ void check_propagator(const Propagator& P, const Band& b, const RadialGrid& g, r
   }
   CHECK(cutOk);
   CHECK(P.cut[0] == 0);
-  // The test grid must exercise the truncation. With a longer focus a0, and krmax in units of 1/a0,
-  // grow and the small grid stays below the cut; the truncation code does not depend on the focus.
-  if (c::focus == 20.0) CHECK(partial > 0);
+  // The test grid must exercise the truncation. krmax in units of 1/a0 grows with a0, so for a0 above
+  // the Fortran value (focus 20, zsic 18) the small grid stays below the cut; the truncation code
+  // itself does not depend on a0.
+  if (c::a0 <= c::a00 * (1 - 18.0 / 20.0)) CHECK(partial > 0);
 }
 
 }  // namespace

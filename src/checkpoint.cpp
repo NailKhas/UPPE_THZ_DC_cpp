@@ -15,7 +15,7 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr char kMagic[8] = {'U', 'P', 'P', 'E', 'C', 'K', 'P', 'T'};
-constexpr std::int32_t kVersion = 2;
+constexpr std::int32_t kVersion = 3;
 constexpr std::uint64_t kHashSeed = 0xcbf29ce484222325ULL;
 
 struct Header {
@@ -26,7 +26,7 @@ struct Header {
   std::int64_t iz, clamped_total;
   double z, z_flag, Imax;
   std::uint64_t nO, nT;
-  double focus;
+  double focus, zsic;
 };
 
 // FNV-1a over 64-bit words: only detects truncated or damaged files.
@@ -96,6 +96,7 @@ void write_checkpoint(const fs::path& file, const Sizes& sizes, const LoopState&
   h.nO = E_O.size();
   h.nT = E_T.size();
   h.focus = c::focus;
+  h.zsic = c::zsic;
 
   const std::size_t bytesO = E_O.size() * sizeof(cplx);
   const std::size_t bytesT = E_T.size() * sizeof(cplx);
@@ -126,9 +127,10 @@ LoopState read_checkpoint(const fs::path& file, const Sizes& sizes, AlignedArray
   if (h.nt_all != sizes.nt_all || h.nR_first != sizes.nR_first || h.nR_opt != sizes.nR_opt ||
       h.nR_THz != sizes.nR_THz || h.nO != E_O.size() || h.nT != E_T.size())
     throw std::runtime_error("checkpoint " + name + " was written for other grid sizes");
-  if (h.focus != c::focus)
+  if (h.focus != c::focus || h.zsic != c::zsic)
     throw std::runtime_error("checkpoint " + name + " was written for focus " + std::to_string(h.focus) +
-                             " cm, this build has " + std::to_string(c::focus) + " cm");
+                             " cm, zsic " + std::to_string(h.zsic) + " cm; this build has focus " +
+                             std::to_string(c::focus) + " cm, zsic " + std::to_string(c::zsic) + " cm");
 
   const std::size_t bytesO = E_O.size() * sizeof(cplx);
   const std::size_t bytesT = E_T.size() * sizeof(cplx);
