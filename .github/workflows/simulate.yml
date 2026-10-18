@@ -1,6 +1,6 @@
 name: Simulate
 
-run-name: "Simulate ${{ inputs.tag }}, segment ${{ inputs.segment }} (focus ${{ inputs.focus }} cm, z_max ${{ inputs.z_max || 'none' }})"
+run-name: "Simulate ${{ inputs.tag }}, segment ${{ inputs.segment }} (focus ${{ inputs.focus }} cm, z_max ${{ inputs.z_max }})"
 
 # One run is one segment of a chain. A segment stops itself before the job time limit or when the disk
 # is nearly full, saves a checkpoint as an artifact and dispatches the next segment, which resumes from it.
@@ -10,8 +10,8 @@ on:
   workflow_dispatch:
     inputs:
       z_max:
-        description: "Stop distance --z-max, cm (empty = no limit, the chain ends at max_segments)"
-        required: false
+        description: "Stop distance --z-max, cm (none = no limit, the chain ends at max_segments)"
+        required: true
         default: "30"
       focus:
         description: "Focal distance, cm (compiled in; pinned for the whole chain)"
@@ -88,7 +88,7 @@ jobs:
             echo "::error::segment $SEGMENT needs resume_run_id"; exit 1
           fi
           num='^[0-9]+(\.[0-9]+)?$'
-          [ -z "$Z_MAX" ] || [[ "$Z_MAX" =~ $num ]] || { echo "::error::bad z_max '$Z_MAX'"; exit 1; }
+          [ "$Z_MAX" = none ] || [[ "$Z_MAX" =~ $num ]] || { echo "::error::bad z_max '$Z_MAX'"; exit 1; }
           [[ "$FOCUS" =~ $num ]] || { echo "::error::bad focus '$FOCUS'"; exit 1; }
           printf 'SEG2=%02d\n' "$SEGMENT" >> "$GITHUB_ENV"
 
@@ -130,7 +130,7 @@ jobs:
               exit 1
             fi
             gh release create "$RELEASE" --prerelease --target "$CODE_SHA" \
-              --title "Simulation $TAG (focus $FOCUS cm, z_max ${Z_MAX:-none})" \
+              --title "Simulation $TAG (focus $FOCUS cm, z_max $Z_MAX)" \
               --notes "Commit $CODE_SHA. Small result files are streamed here; kw_THz is in the artifacts kw-$TAG-segNN of every segment run."
           else
             prev=$(printf '%02d' $((SEGMENT - 1)))
@@ -150,7 +150,7 @@ jobs:
           resume=()
           if [ "$SEGMENT" -gt 1 ]; then resume=(--resume run/checkpoint.bin); fi
           zmax=()
-          if [ -n "$Z_MAX" ]; then zmax=(--z-max "$Z_MAX"); fi
+          if [ "$Z_MAX" != none ]; then zmax=(--z-max "$Z_MAX"); fi
           log="run/log_seg$SEG2.txt"
 
           bash ci/stream_results.sh run "$SEG2" 600 > stream.log 2>&1 &

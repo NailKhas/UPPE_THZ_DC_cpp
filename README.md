@@ -130,13 +130,13 @@ Workflow [`.github/workflows/simulate.yml`](.github/workflows/simulate.yml) со
    коммита (`code_sha` фиксируется в первом сегменте). Сегменты одного `tag` не идут одновременно.
 
 Запуск: Actions → **Simulate** → **Run workflow**, указать `z_max` (см), `focus` (см) и новое имя
-цепочки `tag`, остальные поля оставить по умолчанию. Пустой `z_max` — без ограничения по `z`:
+цепочки `tag`, остальные поля оставить по умолчанию. `z_max = none` — без ограничения по `z`:
 цепочка идёт, пока её не отменят или пока не будет пройдено `max_segments` сегментов.
 `focus` вкомпилируется (`-DUPPE_FOCUS_CM`) и передаётся всем сегментам цепочки. Из командной строки:
 
 ```sh
 gh workflow run simulate.yml -f z_max=30 -f focus=20 -f tag=z30-old
-gh workflow run simulate.yml -f z_max= -f focus=100 -f tag=f100
+gh workflow run simulate.yml -f z_max=none -f focus=100 -f tag=f100
 ```
 
 Пока сегмент считает, `ci/stream_results.sh` раз в 10 минут выкладывает новые результаты в release
