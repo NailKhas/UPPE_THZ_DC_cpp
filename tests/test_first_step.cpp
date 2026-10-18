@@ -57,15 +57,35 @@ int main() {
   CHECK(active > 10);
   CHECK(test::rel_err(eOut.data(), expect.data(), eOut.size()) < 1e-10);
 
-  // SpSIC.dat: one line per active bin.
+  // SpSIC.dat: one line per active bin. The 1e-30 intensity threshold sits at the FFT round-off floor
+  // (|O| ~ 1e-15 |O|max), so bins within two decades of it may be selected differently by MKL/FFTW and
+  // the reference DFT; only bins clearly above or below the threshold are checked.
   {
+    ref::Vec O(tf.ntO);
+    for (int it = 0; it < tf.ntO; ++it) {
+      const double t = it * tf.dt + tf.tmin;
+      O[it] = std::exp(-.5 * t * t) * std::cos(c::w0 * c::t0 * t);
+    }
+    O = ref::fortran_forward(O);
+    double ISm = 0.0;
+    for (int q = 0; q < nq; ++q) ISm = std::max(ISm, std::norm(O[nq + q]));
+
     std::ifstream f(out / "SpSIC.dat");
     CHECK(static_cast<bool>(f));
-    int lines = 0;
-    std::string line;
-    while (std::getline(f, line))
-      if (!line.empty()) ++lines;
-    CHECK(lines >= active);
+    std::vector<bool> listed(nq, false);
+    long long idx = 0;
+    double fr = 0.0, I = 0.0;
+    while (f >> idx >> fr >> I) {
+      const long long q = idx - nq;
+      CHECK(q >= 1 && q < nq);
+      if (q >= 1 && q < nq) {
+        CHECK(!listed[q]);
+        listed[q] = true;
+        CHECK(std::norm(O[nq + q]) > ISm * 1e-32);
+      }
+    }
+    for (int q = 1; q < nq; ++q)
+      if (std::norm(O[nq + q]) > ISm * 1e-28) CHECK(listed[q]);
   }
 
   // Incident.dat: r*a0 and |Ebuf(it,r)|^2 for all n radial points.
