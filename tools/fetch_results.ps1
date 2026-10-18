@@ -22,7 +22,9 @@ param(
   [double]$MinFreeGB = 0.5
 )
 
-$ErrorActionPreference = 'Stop'
+# Not 'Stop': Windows PowerShell 5.1 turns any stderr output of gh or tar into a terminating error,
+# even with 2>$null. Every native call is checked through $LASTEXITCODE instead.
+$ErrorActionPreference = 'Continue'
 $release = "sim-$Tag"
 if (-not $Dest) {
   $Dest = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) "UPPE_$Tag"
