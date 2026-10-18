@@ -26,12 +26,12 @@ jobs:
       OMP_PROC_BIND: close
       OMP_PLACES: cores
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - name: Install FFTW3 and OpenBLAS
+      - name: Install FFTW3, OpenBLAS and pigz
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfftw3-dev libopenblas-dev
+          sudo apt-get install -y libfftw3-dev libopenblas-dev pigz
 
       - name: Configure
         run: cmake --preset fftw-openblas
@@ -66,11 +66,12 @@ jobs:
       - name: Pack results
         if: always()
         run: |
-          if [ -d run ]; then tar -czf results.tar.gz -C run .; fi
+          if [ -d run ]; then tar -I pigz -cf results.tar.gz -C run .; fi
+          ls -lh results.tar.gz || true
 
       - name: Upload results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: uppe-zmax-${{ inputs.z_max }}-${{ github.run_id }}
           path: results.tar.gz
