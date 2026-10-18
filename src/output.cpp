@@ -54,11 +54,11 @@ LineBuffer& LineBuffer::f(float v) {
   return *this;
 }
 
-TextWriter::TextWriter(const std::filesystem::path& file) : name_(path_string(file)) {
+TextWriter::TextWriter(const std::filesystem::path& file, bool append) : name_(path_string(file)) {
 #if defined(_WIN32)
-  fp_ = _wfopen(file.c_str(), L"wb");
+  fp_ = _wfopen(file.c_str(), append ? L"ab" : L"wb");
 #else
-  fp_ = std::fopen(file.c_str(), "wb");
+  fp_ = std::fopen(file.c_str(), append ? "ab" : "wb");
 #endif
   if (!fp_) throw std::runtime_error("cannot open file for writing: " + name_);
 }

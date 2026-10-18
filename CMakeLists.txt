@@ -18,6 +18,7 @@ find_package(OpenMP REQUIRED COMPONENTS CXX)
 
 add_library(uppe_core STATIC
   src/blas.cpp
+  src/checkpoint.cpp
   src/fft.cpp
   src/first_step.cpp
   src/grids.cpp

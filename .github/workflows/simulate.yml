@@ -1,5 +1,10 @@
 name: Simulate
 
+run-name: "Simulate ${{ inputs.tag }}, segment ${{ inputs.segment }} (z_max ${{ inputs.z_max }} cm)"
+
+# One run is one segment of a chain. A segment stops itself before the job time limit, saves a checkpoint
+# as an artifact and dispatches the next segment, which resumes from it. Small result files are streamed
+# to the release sim-<tag> while the segment runs; kw_THz goes to the artifact kw-<tag>-segNN.
 on:
   workflow_dispatch:
     inputs:
@@ -7,26 +12,79 @@ on:
         description: "Stop distance --z-max, cm"
         required: true
         default: "30"
-      time_limit_minutes:
-        description: "Wall-clock limit for the simulation itself, minutes (the job is killed by GitHub at 360)"
+      tag:
+        description: "Chain name (letters, digits, . _ -): release sim-<tag>, artifacts kw-<tag>-segNN"
+        required: true
+        default: "z30"
+      segment:
+        description: "Segment number (1 starts a new chain; later segments are dispatched automatically)"
+        required: true
+        default: "1"
+      resume_run_id:
+        description: "Run id of the previous segment (for segment > 1)"
+        required: false
+        default: ""
+      code_sha:
+        description: "Commit to build (empty = the selected branch; pinned for the whole chain)"
+        required: false
+        default: ""
+      budget_minutes:
+        description: "Wall-clock budget of one segment from job start, minutes (GitHub kills jobs at 360)"
         required: true
         default: "330"
+      max_segments:
+        description: "Do not dispatch segments beyond this number"
+        required: true
+        default: "15"
       run_tests:
         description: "Run ctest before the simulation"
         type: boolean
         default: true
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: simulate-${{ inputs.tag }}
+  cancel-in-progress: false
 
 jobs:
   simulate:
     runs-on: ubuntu-latest
     timeout-minutes: 355
     env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag }}
+      RELEASE: sim-${{ inputs.tag }}
+      SEGMENT: ${{ inputs.segment }}
+      RESUME_RUN_ID: ${{ inputs.resume_run_id }}
       Z_MAX: ${{ inputs.z_max }}
-      LIMIT: ${{ inputs.time_limit_minutes }}
+      BUDGET: ${{ inputs.budget_minutes }}
+      MAX_SEGMENTS: ${{ inputs.max_segments }}
+      RUN_TESTS: ${{ inputs.run_tests }}
+      # Minutes kept after the simulation for the last streaming pass, packing and uploads.
+      RESERVE: "15"
       OMP_PROC_BIND: close
       OMP_PLACES: cores
     steps:
+      - name: Start clock and check inputs
+        run: |
+          echo "T0=$(date +%s)" >> "$GITHUB_ENV"
+          [[ "$TAG" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::bad tag '$TAG'"; exit 1; }
+          [[ "$SEGMENT" =~ ^[0-9]+$ && "$SEGMENT" -ge 1 ]] || { echo "::error::bad segment '$SEGMENT'"; exit 1; }
+          if [ "$SEGMENT" -gt 1 ] && [ -z "$RESUME_RUN_ID" ]; then
+            echo "::error::segment $SEGMENT needs resume_run_id"; exit 1
+          fi
+          printf 'SEG2=%02d\n' "$SEGMENT" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.code_sha || github.sha }}
+
+      - name: Record commit
+        run: echo "CODE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Install FFTW3, OpenBLAS and pigz
         run: |
@@ -43,38 +101,118 @@ jobs:
         if: ${{ inputs.run_tests }}
         run: ctest --preset fftw-openblas
 
-      - name: Simulate
+      - name: Prepare release and checkpoint
         run: |
           mkdir -p run
+          if [ "$SEGMENT" -eq 1 ]; then
+            if gh release view "$RELEASE" > /dev/null 2>&1; then
+              echo "::error::Release $RELEASE already exists: choose another tag or delete the release and its tag"
+              exit 1
+            fi
+            gh release create "$RELEASE" --prerelease --target "$CODE_SHA" \
+              --title "Simulation $TAG (z_max $Z_MAX cm)" \
+              --notes "Commit $CODE_SHA. Small result files are streamed here; kw_THz is in the artifacts kw-$TAG-segNN of every segment run."
+          else
+            prev=$(printf '%02d' $((SEGMENT - 1)))
+            gh run download "$RESUME_RUN_ID" -n "ckpt-$TAG-seg$prev" -D run
+            ls -l run run/res
+          fi
+
+      - name: Simulate
+        run: |
           nproc
           free -h
           df -h .
+          elapsed=$(( ($(date +%s) - T0) / 60 ))
+          limit=$(( BUDGET - elapsed - RESERVE ))
+          if [ "$limit" -lt 5 ]; then echo "::error::budget too small: $limit min left for the simulation"; exit 1; fi
+          echo "Simulation wall limit: $limit min"
+          resume=()
+          if [ "$SEGMENT" -gt 1 ]; then resume=(--resume run/checkpoint.bin); fi
+          log="run/log_seg$SEG2.txt"
+
+          bash ci/stream_results.sh run "$SEG2" 600 > stream.log 2>&1 &
+          streamer=$!
+
           set +e
-          timeout --signal=INT --kill-after=2m "${LIMIT}m" \
+          timeout --preserve-status --signal=TERM --kill-after=5m "$((limit + 10))m" \
             ./build/fftw-openblas/uppe_thz_dc --data-dir data --out-dir run --z-max "$Z_MAX" --threads "$(nproc)" \
-            2>&1 | tee run/log.txt
+            --wall-limit-min "$limit" --checkpoint run/checkpoint.bin "${resume[@]}" 2>&1 | tee "$log"
           code=${PIPESTATUS[0]}
           set -e
+          echo "SIM_CODE=$code" >> "$GITHUB_ENV"
+          echo "Simulation exit code: $code"
+
+          touch run/.stream_stop
+          wait "$streamer" || true
+          cat stream.log
           df -h .
           du -sh run
-          if [ "$code" -eq 124 ]; then
-            echo "::warning::Stopped by the ${LIMIT}-minute time limit before z = ${Z_MAX} cm; results up to the last step are kept."
-          elif [ "$code" -ne 0 ]; then
-            exit "$code"
-          fi
 
-      - name: Pack results
+      - name: Pack kw_THz
         if: always()
         run: |
-          if [ -d run ]; then tar -I pigz -cf results.tar.gz -C run .; fi
-          ls -lh results.tar.gz || true
+          if compgen -G "run/res/kw_THz/*.dat" > /dev/null; then
+            extra=()
+            [ -f "run/log_seg$SEG2.txt" ] && extra=("log_seg$SEG2.txt")
+            tar -I pigz -cf kw.tar.gz -C run res/kw_THz "${extra[@]}"
+            ls -lh kw.tar.gz
+          fi
 
-      - name: Upload results
+      - name: Upload kw_THz
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: uppe-zmax-${{ inputs.z_max }}-${{ github.run_id }}
-          path: results.tar.gz
+          name: kw-${{ inputs.tag }}-seg${{ env.SEG2 }}
+          path: kw.tar.gz
           if-no-files-found: ignore
           retention-days: 90
           compression-level: 0
+
+      - name: Upload checkpoint
+        if: env.SIM_CODE == '75'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ckpt-${{ inputs.tag }}-seg${{ env.SEG2 }}
+          path: |
+            run/checkpoint.bin
+            run/res/Imax.dat
+            run/res/Nemax.dat
+            run/res/Energy.dat
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 1
+
+      - name: Dispatch next segment
+        if: env.SIM_CODE == '75'
+        run: |
+          next=$((SEGMENT + 1))
+          if [ "$next" -gt "$MAX_SEGMENTS" ]; then
+            echo "::warning::max_segments = $MAX_SEGMENTS reached; continue manually with segment=$next resume_run_id=$GITHUB_RUN_ID code_sha=$CODE_SHA"
+            exit 0
+          fi
+          gh workflow run simulate.yml --ref "$GITHUB_REF_NAME" \
+            -f z_max="$Z_MAX" -f tag="$TAG" -f segment="$next" -f resume_run_id="$GITHUB_RUN_ID" \
+            -f code_sha="$CODE_SHA" -f budget_minutes="$BUDGET" -f max_segments="$MAX_SEGMENTS" -f run_tests="$RUN_TESTS"
+          echo "Dispatched segment $next"
+
+      - name: Report
+        if: always()
+        run: |
+          z=$(tail -n 1 run/res/Imax.dat 2> /dev/null | awk '{print $1}')
+          case "${SIM_CODE:-}" in
+            0) state="z_max reached, chain finished" ;;
+            75) state="stopped with a checkpoint" ;;
+            *) state="FAILED (exit code ${SIM_CODE:-none})" ;;
+          esac
+          line="segment $SEG2, run $GITHUB_RUN_ID: z = ${z:-?} cm, $state"
+          echo "$line" >> "$GITHUB_STEP_SUMMARY"
+          if gh release view "$RELEASE" > /dev/null 2>&1; then
+            body=$(gh release view "$RELEASE" --json body -q .body)
+            gh release edit "$RELEASE" --notes "$body"$'\n'"- $line" || true
+            if [ "${SIM_CODE:-}" = "0" ]; then
+              echo "$line" > DONE.txt
+              gh release upload "$RELEASE" DONE.txt --clobber
+            fi
+          fi
+          if [ "${SIM_CODE:-}" != "0" ] && [ "${SIM_CODE:-}" != "75" ]; then exit 1; fi

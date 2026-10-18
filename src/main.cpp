@@ -1,5 +1,6 @@
 #include <omp.h>
 
+#include <csignal>
 #include <cstdio>
 #include <exception>
 #include <stdexcept>
@@ -10,13 +11,30 @@
 
 namespace {
 
+// Exit code of a run that stopped early and left a checkpoint to continue from (EX_TEMPFAIL).
+constexpr int kExitContinue = 75;
+
+volatile std::sig_atomic_t g_stop = 0;
+
+// The first signal asks for a stop after the current step; a second one kills the process.
+extern "C" void on_stop_signal(int sig) {
+  g_stop = 1;
+  std::signal(sig, SIG_DFL);
+}
+
 void usage() {
   std::printf(
       "Usage: uppe_thz_dc [options]\n"
-      "  --z-max <cm>      stop once z reaches this distance (default: run until killed, as the Fortran code)\n"
-      "  --threads <n>     number of OpenMP threads (default: OMP_NUM_THREADS or all cores)\n"
-      "  --data-dir <dir>  directory with N2.dat and O2.dat (default: current directory)\n"
-      "  --out-dir <dir>   directory for res/, SpSIC.dat and Incident.dat (default: current directory)\n");
+      "  --z-max <cm>          stop once z reaches this distance (default: run until killed, as the Fortran code)\n"
+      "  --threads <n>         number of OpenMP threads (default: OMP_NUM_THREADS or all cores)\n"
+      "  --data-dir <dir>      directory with N2.dat and O2.dat (default: current directory)\n"
+      "  --out-dir <dir>       directory for res/, SpSIC.dat and Incident.dat (default: current directory)\n"
+      "  --checkpoint <file>   on an early stop (time limit, SIGINT/SIGTERM, --max-steps) save the state here\n"
+      "  --resume <file>       continue from a checkpoint; res/Imax.dat, Nemax.dat, Energy.dat are appended to\n"
+      "  --wall-limit-min <m>  stop before the run exceeds m minutes of wall time\n"
+      "  --max-steps <n>       stop after n z steps in total\n"
+      "Exit code: 0 when --z-max is reached, %d when the run stopped early, 1 on error.\n",
+      kExitContinue);
 }
 
 }  // namespace
@@ -40,6 +58,16 @@ int main(int argc, char** argv) {
         cfg.data_dir = value();
       } else if (opt == "--out-dir") {
         cfg.out_dir = value();
+      } else if (opt == "--checkpoint") {
+        cfg.checkpoint_path = value();
+      } else if (opt == "--resume") {
+        cfg.resume_path = value();
+      } else if (opt == "--wall-limit-min") {
+        const double m = std::stod(value());
+        if (!(m > 0.0)) throw std::runtime_error("--wall-limit-min must be positive");
+        cfg.wall_limit_s = m * 60.0;
+      } else if (opt == "--max-steps") {
+        cfg.max_steps = std::stoll(value());
       } else if (opt == "-h" || opt == "--help") {
         usage();
         return 0;
@@ -47,8 +75,11 @@ int main(int argc, char** argv) {
         throw std::runtime_error("unknown option " + opt);
       }
     }
+    std::signal(SIGINT, on_stop_signal);
+    std::signal(SIGTERM, on_stop_signal);
+    cfg.stop_flag = &g_stop;
     uppe::blas_init();
-    uppe::run_simulation(cfg);
+    if (uppe::run_simulation(cfg) == uppe::RunStatus::Stopped) return kExitContinue;
   } catch (const std::exception& e) {
     std::fprintf(stderr, "error: %s\n", e.what());
     return 1;

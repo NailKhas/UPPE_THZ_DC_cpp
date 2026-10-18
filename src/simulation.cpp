@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "checkpoint.hpp"
 #include "common.hpp"
 #include "fft.hpp"
 #include "first_step.hpp"
@@ -121,19 +122,22 @@ void add_to(cplx* E, const cplx* K, std::size_t n) {
 
 }  // namespace
 
-void run_simulation(const RunConfig& cfg) {
+RunStatus run_simulation(const RunConfig& cfg) {
+  const double wall_start = omp_get_wtime();
   const Sizes& sz = cfg.sizes;
   const TimeFreq tf = make_time_freq(sz.nt_all);
   validate(sz, tf);
   const int nthreads = max_threads();
   const fs::path& out = cfg.out_dir;
   create_output_dirs(out);
+  // A resumed run continues the scalar files and does not rewrite what the first run already wrote.
+  const bool resume = !cfg.resume_path.empty();
 
   // InitConsts
   Physics ph = make_physics();
   load_ionization_tables(ph, cfg.data_dir);
   // PARALLEL.f90 calls write_params before PrepareKZ_opt, so ng = 0 and Ldisp = Infinity are reported.
-  write_params(ph, 0.0, 0.0, nthreads, sz, tf, out);
+  if (!resume) write_params(ph, 0.0, 0.0, nthreads, sz, tf, out);
 
   const int ntO = tf.ntO;
   const int nqO = tf.nqO;
@@ -148,52 +152,73 @@ void run_simulation(const RunConfig& cfg) {
   const Band bandO = make_band(ntO, tf.dw, tf.wmin);
   const Dispersion disp = compute_dispersion(bandO, tf);
 
-  TextWriter fImax(out / "res" / "Imax.dat");
-  TextWriter fNemax(out / "res" / "Nemax.dat");
-  TextWriter fEnergy(out / "res" / "Energy.dat");
-  TextWriter fDen(out / "res" / "Den.dat");  // opened and never written, as in the Fortran
+  TextWriter fImax(out / "res" / "Imax.dat", resume);
+  TextWriter fNemax(out / "res" / "Nemax.dat", resume);
+  TextWriter fEnergy(out / "res" / "Energy.dat", resume);
+  TextWriter fDen(out / "res" / "Den.dat", resume);  // opened and never written, as in the Fortran
+  TextWriter fSnaps(out / "res" / "snapshots.txt", resume);  // z_pos of every completed snapshot
 
-  std::printf(" --- Incoming ---\n");
-  std::fflush(stdout);
-  AlignedArray<cplx> E_O(nO);
+  AlignedArray<cplx> E_O(nO);   // E(w,kr)
+  AlignedArray<cplx> E_T(nT);   // E_THz(w,kr)
   double dz = c::zsic / c::Ldifr;
-  {
-    const RadialGrid g1 = make_radial(roots, sz.nR_first, sz.nR_opt, RadialKind::First);
-    const HankelMatrix H1 = make_hankel(roots, sz.nR_first);
-    const double dz0 = 400. / c::Ldifr;
-    first_step(tf, bandO, g1, H1, disp.vg, dz, dz0, nrO, E_O.data(), out);
-  }
   double z = 0.0;
-  z = z + dz;
-  double z_flag = z;
-  double Imax = sq(c::a00 / c::a0);
+  double z_flag = 0.0;
+  double Imax = 0.0;
+  long long iz = 0;
+  long long clamped_total = 0;
+  if (resume) {
+    const LoopState st = read_checkpoint(cfg.resume_path, sz, E_O, E_T);
+    iz = st.iz;
+    clamped_total = st.clamped_total;
+    z = st.z;
+    z_flag = st.z_flag;
+    Imax = st.Imax;
+    std::printf(" --- Resumed from %s at step %lld, z = %.15g cm ---\n", path_string(cfg.resume_path).c_str(), iz,
+                z * c::Ldifr);
+    std::fflush(stdout);
+  } else {
+    std::printf(" --- Incoming ---\n");
+    std::fflush(stdout);
+    {
+      const RadialGrid g1 = make_radial(roots, sz.nR_first, sz.nR_opt, RadialKind::First);
+      const HankelMatrix H1 = make_hankel(roots, sz.nR_first);
+      const double dz0 = 400. / c::Ldifr;
+      first_step(tf, bandO, g1, H1, disp.vg, dz, dz0, nrO, E_O.data(), out);
+    }
+    z = z + dz;
+    z_flag = z;
+    Imax = sq(c::a00 / c::a0);
+  }
 
   // Prepare_R_opt and the second PrepareKZ_opt
   const RadialGrid gO = make_radial(roots, sz.nR_opt, sz.nR_opt, RadialKind::Optical);
-  write_radial_files(out, gO, "rO1_um.dat", "rO1.dat", "krO1.dat");
+  if (!resume) write_radial_files(out, gO, "rO1_um.dat", "rO1.dat", "krO1.dat");
   const HankelMatrix HO = make_hankel(roots, sz.nR_opt);
   const Propagator PO = make_propagator(bandO, gO, disp.vg, c::omega_max);
-  write_band_files(out, bandO, PO, BandKind::Optical);
-  write_collision_file(out, tf);
+  if (!resume) {
+    write_band_files(out, bandO, PO, BandKind::Optical);
+    write_collision_file(out, tf);
+  }
 
   AlignedArray<cplx> W_O(nO);   // Et before FurThread: E(w,r)
   AlignedArray<cplx> K_O(nO);   // k(w,kr)
   AlignedArray<cplx> Kr_O(nO);  // k(w,r) from JefThread
 
-  // E = Ebuf(:,1:nR-1); call ParallelThis(HnkThread,E)
-  hankel_spectral(HO, HankelInput{E_O.data(), nullptr, 0.0, nrO}, W_O.data(), nrO, nqO, nullptr, nullptr);
-  std::swap(E_O, W_O);
-  std::printf(" E(w,kr) is obtained on new grid\n");
+  if (!resume) {
+    // E = Ebuf(:,1:nR-1); call ParallelThis(HnkThread,E)
+    hankel_spectral(HO, HankelInput{E_O.data(), nullptr, 0.0, nrO}, W_O.data(), nrO, nqO, nullptr, nullptr);
+    std::swap(E_O, W_O);
+    std::printf(" E(w,kr) is obtained on new grid\n");
+  }
 
   // PrepareKZ
   const RadialGrid gT = make_radial(roots, sz.nR_THz, sz.nR_opt, RadialKind::THz);
-  write_radial_files(out, gT, "r1T_um.dat", "r1T.dat", "krT.dat");
+  if (!resume) write_radial_files(out, gT, "r1T_um.dat", "r1T.dat", "krT.dat");
   const HankelMatrix HT = make_hankel(roots, sz.nR_THz);
   const Band bandT = make_band(tf.ntT, tf.dw_THz, tf.wmin_THz);
   const Propagator PT = make_propagator(bandT, gT, disp.vg, c::omega_max_THz);
-  write_band_files(out, bandT, PT, BandKind::THz);
+  if (!resume) write_band_files(out, bandT, PT, BandKind::THz);
 
-  AlignedArray<cplx> E_T(nT);   // E_THz(w,kr)
   AlignedArray<cplx> K_T(nT);   // k_THz(w,kr)
   AlignedArray<cplx> B_T(nT);   // Ebuf(w,r); rows >= nR_opt-1 are valid only on snapshot steps
   AlignedArray<cplx> Kr_T(static_cast<std::size_t>(nrO) * nqT);  // k_THz(w,r) from JefThread
@@ -212,7 +237,6 @@ void run_simulation(const RunConfig& cfg) {
   nl.k_thz = Kr_T.data();
   nl.ne_max = neMax.data();
 
-  long long clamped_total = 0;
   auto run_nonlinear = [&](double step) {
     nl.dz = step;
     const long long cnt = nonlinear_response(nl, nlws);
@@ -231,7 +255,8 @@ void run_simulation(const RunConfig& cfg) {
   };
 
   const double k0a0a0 = c::k0 * c::a0 * c::a0;
-  long long iz = 0;
+  RunStatus status = RunStatus::Stopped;
+  double max_step_time = 0.0;
   std::printf(" --- Start propagation ---\n");
   for (;;) {
     const double wall0 = omp_get_wtime();
@@ -239,6 +264,7 @@ void run_simulation(const RunConfig& cfg) {
     std::printf(" Step %lld\n", iz);
 
     std::unique_ptr<Snapshot> snap;
+    int z_pos = 0;
     std::fill(Fl.begin(), Fl.end(), 0.0);
     if (z >= z_flag) {
       if ((z < 19. / k0a0a0) || (z >= static_cast<double>(20.2f) / k0a0a0)) {
@@ -246,7 +272,7 @@ void run_simulation(const RunConfig& cfg) {
       } else {
         z_flag = z_flag + static_cast<double>(0.1f) / k0a0a0;
       }
-      const int z_pos = static_cast<int>(z * k0a0a0 * 1e2);
+      z_pos = static_cast<int>(z * k0a0a0 * 1e2);
       snap = open_snapshot(out, z_pos);
       write_rows_parallel(snap->kw_thz, nrT, [&](int i, LineBuffer& b) {
         const cplx* row = E_T.data() + static_cast<std::size_t>(i) * nqT;
@@ -323,6 +349,8 @@ void run_simulation(const RunConfig& cfg) {
       for (int i = 0; i < nrO; ++i) snap->ne.d(gO.r1[i]).d(neMax[i]).nl();
       snap->close();
       snap.reset();
+      fSnaps.i(z_pos).nl();
+      fSnaps.flush();
     }
 
     to_kr_and_divide();
@@ -345,19 +373,47 @@ void run_simulation(const RunConfig& cfg) {
     linear_step(E_T.data(), PT, gT, bandT, 0, dz);
     linear_step(E_O.data(), PO, gO, bandO, tf.opt_lin_start, dz);
 
-    std::printf(" step time %.3f s\n", omp_get_wtime() - wall0);
+    const double step_time = omp_get_wtime() - wall0;
+    std::printf(" step time %.3f s\n", step_time);
     std::fflush(stdout);
+    max_step_time = std::max(max_step_time, step_time);
 
-    if (cfg.z_max_cm && z * c::Ldifr >= *cfg.z_max_cm) break;
+    if (cfg.z_max_cm && z * c::Ldifr >= *cfg.z_max_cm) {
+      status = RunStatus::Finished;
+      break;
+    }
     if (cfg.max_steps >= 0 && iz >= cfg.max_steps) break;
+    // The next step may be a snapshot step, which is slower than the slowest one seen so far.
+    if (cfg.wall_limit_s && omp_get_wtime() - wall_start + 1.5 * max_step_time > *cfg.wall_limit_s) {
+      std::printf(" Wall-clock limit is near, stopping\n");
+      break;
+    }
+    if (cfg.stop_flag && *cfg.stop_flag) {
+      std::printf(" Stop requested by a signal\n");
+      break;
+    }
   }
 
   fImax.close();
   fNemax.close();
   fEnergy.close();
   fDen.close();
+  fSnaps.close();
+  if (status == RunStatus::Stopped && !cfg.checkpoint_path.empty()) {
+    LoopState st;
+    st.iz = iz;
+    st.clamped_total = clamped_total;
+    st.z = z;
+    st.z_flag = z_flag;
+    st.Imax = Imax;
+    write_checkpoint(cfg.checkpoint_path, sz, st, E_O, E_T);
+    std::printf(" Checkpoint written to %s at step %lld, z = %.15g cm\n", path_string(cfg.checkpoint_path).c_str(),
+                iz, z * c::Ldifr);
+  }
   if (clamped_total > 0) std::printf(" Ionization-table lookups clamped: %lld\n", clamped_total);
   std::printf(" That's it %.15g\n", z);
+  std::fflush(stdout);
+  return status;
 }
 
 }  // namespace uppe

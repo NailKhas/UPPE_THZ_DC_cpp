@@ -34,7 +34,7 @@ class LineBuffer {
 class TextWriter {
  public:
   TextWriter() = default;
-  explicit TextWriter(const std::filesystem::path& file);
+  explicit TextWriter(const std::filesystem::path& file, bool append = false);
   ~TextWriter();
   TextWriter(TextWriter&& o) noexcept;
   TextWriter& operator=(TextWriter&& o) noexcept;
