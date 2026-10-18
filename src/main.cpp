@@ -32,6 +32,7 @@ void usage() {
       "  --checkpoint <file>   on an early stop (time limit, SIGINT/SIGTERM, --max-steps) save the state here\n"
       "  --resume <file>       continue from a checkpoint; res/Imax.dat, Nemax.dat, Energy.dat are appended to\n"
       "  --wall-limit-min <m>  stop before the run exceeds m minutes of wall time\n"
+      "  --min-free-gb <g>     stop once less than g GB (1e9 bytes) are free on the disk of --out-dir\n"
       "  --max-steps <n>       stop after n z steps in total\n"
       "Exit code: 0 when --z-max is reached, %d when the run stopped early, 1 on error.\n",
       kExitContinue);
@@ -66,6 +67,10 @@ int main(int argc, char** argv) {
         const double m = std::stod(value());
         if (!(m > 0.0)) throw std::runtime_error("--wall-limit-min must be positive");
         cfg.wall_limit_s = m * 60.0;
+      } else if (opt == "--min-free-gb") {
+        const double g = std::stod(value());
+        if (!(g > 0.0)) throw std::runtime_error("--min-free-gb must be positive");
+        cfg.min_free_bytes = g * 1e9;
       } else if (opt == "--max-steps") {
         cfg.max_steps = std::stoll(value());
       } else if (opt == "-h" || opt == "--help") {

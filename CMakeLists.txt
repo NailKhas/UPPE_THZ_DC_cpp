@@ -13,6 +13,17 @@ set(UPPE_BACKEND "MKL" CACHE STRING "Numerical backend: MKL or FFTW_OPENBLAS")
 set_property(CACHE UPPE_BACKEND PROPERTY STRINGS MKL FFTW_OPENBLAS)
 option(UPPE_NATIVE "Optimize for the CPU of the build machine" ON)
 option(UPPE_BUILD_TESTS "Build unit tests" ON)
+set(UPPE_FOCUS_CM "20.0" CACHE STRING "Focal distance in cm (compile-time constant c::focus)")
+if(NOT UPPE_FOCUS_CM MATCHES "^[0-9]+(\\.[0-9]*)?$" OR UPPE_FOCUS_CM MATCHES "^0*(\\.0*)?$")
+  message(FATAL_ERROR "UPPE_FOCUS_CM must be a positive number, got '${UPPE_FOCUS_CM}'")
+endif()
+# The value is pasted into C++ as a double literal.
+if(NOT UPPE_FOCUS_CM MATCHES "\\.")
+  set(_uppe_focus_literal "${UPPE_FOCUS_CM}.0")
+else()
+  set(_uppe_focus_literal "${UPPE_FOCUS_CM}0")
+endif()
+message(STATUS "Focal distance: ${UPPE_FOCUS_CM} cm")
 
 find_package(OpenMP REQUIRED COMPONENTS CXX)
 
@@ -31,6 +42,7 @@ add_library(uppe_core STATIC
 )
 target_include_directories(uppe_core PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(uppe_core PUBLIC OpenMP::OpenMP_CXX)
+target_compile_definitions(uppe_core PUBLIC UPPE_FOCUS_CM=${_uppe_focus_literal})
 
 # The port follows the Fortran operation order and IEEE semantics, so value-changing
 # floating-point optimizations (-ffast-math, /fp:fast, icx default -fp-model=fast) must stay off.

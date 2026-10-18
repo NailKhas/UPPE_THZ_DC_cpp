@@ -388,6 +388,14 @@ RunStatus run_simulation(const RunConfig& cfg) {
       std::printf(" Wall-clock limit is near, stopping\n");
       break;
     }
+    if (cfg.min_free_bytes) {
+      std::error_code ec;
+      const fs::space_info si = fs::space(out, ec);
+      if (!ec && static_cast<double>(si.available) < *cfg.min_free_bytes) {
+        std::printf(" Free disk space is %.2f GB, stopping\n", static_cast<double>(si.available) / 1e9);
+        break;
+      }
+    }
     if (cfg.stop_flag && *cfg.stop_flag) {
       std::printf(" Stop requested by a signal\n");
       break;

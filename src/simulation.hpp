@@ -17,12 +17,13 @@ struct RunConfig {
   std::filesystem::path checkpoint_path;  // written whenever the run stops before z_max; empty = never
   std::filesystem::path resume_path;      // continue from this checkpoint instead of FirstStep; empty = fresh run
   std::optional<double> wall_limit_s;     // stop early enough to stay within this wall time, s
+  std::optional<double> min_free_bytes;   // stop once the free space on out_dir's disk drops below this
   const volatile std::sig_atomic_t* stop_flag = nullptr;  // nonzero = stop after the current step
 };
 
 enum class RunStatus {
   Finished,  // z_max reached
-  Stopped,   // max_steps, wall_limit_s or stop_flag; the checkpoint (if requested) is written
+  Stopped,   // max_steps, wall_limit_s, min_free_bytes or stop_flag; the checkpoint (if requested) is written
 };
 
 // Program PARALLEL (PARALLEL.f90).

@@ -19,7 +19,11 @@ inline constexpr double tmax_THz = 800.0;
 
 inline constexpr double Rmax = 20.0;
 
-inline constexpr double focus = 20.0;
+// Focal distance, cm; set at configure time with -DUPPE_FOCUS_CM=<cm> (the Fortran value is 20).
+#ifndef UPPE_FOCUS_CM
+#define UPPE_FOCUS_CM 20.0
+#endif
+inline constexpr double focus = UPPE_FOCUS_CM;
 inline constexpr double zsic = 18.0;
 inline constexpr double t1 = 44.0e-15;
 inline constexpr double t0 = 54.0e-15;

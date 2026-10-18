@@ -1,17 +1,22 @@
 name: Simulate
 
-run-name: "Simulate ${{ inputs.tag }}, segment ${{ inputs.segment }} (z_max ${{ inputs.z_max }} cm)"
+run-name: "Simulate ${{ inputs.tag }}, segment ${{ inputs.segment }} (focus ${{ inputs.focus }} cm, z_max ${{ inputs.z_max || 'none' }})"
 
-# One run is one segment of a chain. A segment stops itself before the job time limit, saves a checkpoint
-# as an artifact and dispatches the next segment, which resumes from it. Small result files are streamed
-# to the release sim-<tag> while the segment runs; kw_THz goes to the artifact kw-<tag>-segNN.
+# One run is one segment of a chain. A segment stops itself before the job time limit or when the disk
+# is nearly full, saves a checkpoint as an artifact and dispatches the next segment, which resumes from it.
+# Small result files are streamed to the release sim-<tag> while the segment runs; kw_THz goes to the
+# artifact kw-<tag>-segNN.
 on:
   workflow_dispatch:
     inputs:
       z_max:
-        description: "Stop distance --z-max, cm"
-        required: true
+        description: "Stop distance --z-max, cm (empty = no limit, the chain ends at max_segments)"
+        required: false
         default: "30"
+      focus:
+        description: "Focal distance, cm (compiled in; pinned for the whole chain)"
+        required: true
+        default: "20"
       tag:
         description: "Chain name (letters, digits, . _ -): release sim-<tag>, artifacts kw-<tag>-segNN"
         required: true
@@ -61,11 +66,16 @@ jobs:
       SEGMENT: ${{ inputs.segment }}
       RESUME_RUN_ID: ${{ inputs.resume_run_id }}
       Z_MAX: ${{ inputs.z_max }}
+      FOCUS: ${{ inputs.focus }}
       BUDGET: ${{ inputs.budget_minutes }}
       MAX_SEGMENTS: ${{ inputs.max_segments }}
       RUN_TESTS: ${{ inputs.run_tests }}
-      # Minutes kept after the simulation for the last streaming pass, packing and uploads.
-      RESERVE: "15"
+      # Minutes kept after the simulation for the last streaming pass, packing and uploads
+      # (a full disk of kw_THz, ~70 GB, packs in ~13 min and uploads in ~4 min).
+      RESERVE: "25"
+      # The simulation stops with a checkpoint when less is free: room for one more snapshot (1.35 GB),
+      # the checkpoint (0.7 GB) and packing.
+      MIN_FREE_GB: "6"
       OMP_PROC_BIND: close
       OMP_PLACES: cores
     steps:
@@ -77,6 +87,9 @@ jobs:
           if [ "$SEGMENT" -gt 1 ] && [ -z "$RESUME_RUN_ID" ]; then
             echo "::error::segment $SEGMENT needs resume_run_id"; exit 1
           fi
+          num='^[0-9]+(\.[0-9]+)?$'
+          [ -z "$Z_MAX" ] || [[ "$Z_MAX" =~ $num ]] || { echo "::error::bad z_max '$Z_MAX'"; exit 1; }
+          [[ "$FOCUS" =~ $num ]] || { echo "::error::bad focus '$FOCUS'"; exit 1; }
           printf 'SEG2=%02d\n' "$SEGMENT" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v7
@@ -86,13 +99,20 @@ jobs:
       - name: Record commit
         run: echo "CODE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
+      - name: Free disk space
+        run: |
+          df -h .
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/share/swift /usr/local/share/powershell || true
+          df -h .
+
       - name: Install FFTW3, OpenBLAS and pigz
         run: |
           sudo apt-get update
           sudo apt-get install -y libfftw3-dev libopenblas-dev pigz
 
       - name: Configure
-        run: cmake --preset fftw-openblas
+        run: cmake --preset fftw-openblas -DUPPE_FOCUS_CM="$FOCUS"
 
       - name: Build
         run: cmake --build --preset fftw-openblas -j "$(nproc)"
@@ -110,7 +130,7 @@ jobs:
               exit 1
             fi
             gh release create "$RELEASE" --prerelease --target "$CODE_SHA" \
-              --title "Simulation $TAG (z_max $Z_MAX cm)" \
+              --title "Simulation $TAG (focus $FOCUS cm, z_max ${Z_MAX:-none})" \
               --notes "Commit $CODE_SHA. Small result files are streamed here; kw_THz is in the artifacts kw-$TAG-segNN of every segment run."
           else
             prev=$(printf '%02d' $((SEGMENT - 1)))
@@ -129,6 +149,8 @@ jobs:
           echo "Simulation wall limit: $limit min"
           resume=()
           if [ "$SEGMENT" -gt 1 ]; then resume=(--resume run/checkpoint.bin); fi
+          zmax=()
+          if [ -n "$Z_MAX" ]; then zmax=(--z-max "$Z_MAX"); fi
           log="run/log_seg$SEG2.txt"
 
           bash ci/stream_results.sh run "$SEG2" 600 > stream.log 2>&1 &
@@ -136,8 +158,9 @@ jobs:
 
           set +e
           timeout --preserve-status --signal=TERM --kill-after=5m "$((limit + 10))m" \
-            ./build/fftw-openblas/uppe_thz_dc --data-dir data --out-dir run --z-max "$Z_MAX" --threads "$(nproc)" \
-            --wall-limit-min "$limit" --checkpoint run/checkpoint.bin "${resume[@]}" 2>&1 | tee "$log"
+            ./build/fftw-openblas/uppe_thz_dc --data-dir data --out-dir run "${zmax[@]}" --threads "$(nproc)" \
+            --wall-limit-min "$limit" --min-free-gb "$MIN_FREE_GB" --checkpoint run/checkpoint.bin "${resume[@]}" \
+            2>&1 | tee "$log"
           code=${PIPESTATUS[0]}
           set -e
           echo "SIM_CODE=$code" >> "$GITHUB_ENV"
@@ -155,7 +178,8 @@ jobs:
           if compgen -G "run/res/kw_THz/*.dat" > /dev/null; then
             extra=()
             [ -f "run/log_seg$SEG2.txt" ] && extra=("log_seg$SEG2.txt")
-            tar -I pigz -cf kw.tar.gz -C run res/kw_THz "${extra[@]}"
+            # Packed files are deleted as they go, so a nearly full disk still has room for the archive.
+            tar -I pigz --remove-files -cf kw.tar.gz -C run res/kw_THz "${extra[@]}"
             ls -lh kw.tar.gz
           fi
 
@@ -192,7 +216,7 @@ jobs:
             exit 0
           fi
           gh workflow run simulate.yml --ref "$GITHUB_REF_NAME" \
-            -f z_max="$Z_MAX" -f tag="$TAG" -f segment="$next" -f resume_run_id="$GITHUB_RUN_ID" \
+            -f z_max="$Z_MAX" -f focus="$FOCUS" -f tag="$TAG" -f segment="$next" -f resume_run_id="$GITHUB_RUN_ID" \
             -f code_sha="$CODE_SHA" -f budget_minutes="$BUDGET" -f max_segments="$MAX_SEGMENTS" -f run_tests="$RUN_TESTS"
           echo "Dispatched segment $next"
 
