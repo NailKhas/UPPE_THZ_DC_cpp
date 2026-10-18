@@ -1,0 +1,79 @@
+name: Simulate
+
+on:
+  workflow_dispatch:
+    inputs:
+      z_max:
+        description: "Stop distance --z-max, cm"
+        required: true
+        default: "30"
+      time_limit_minutes:
+        description: "Wall-clock limit for the simulation itself, minutes (the job is killed by GitHub at 360)"
+        required: true
+        default: "330"
+      run_tests:
+        description: "Run ctest before the simulation"
+        type: boolean
+        default: true
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      Z_MAX: ${{ inputs.z_max }}
+      LIMIT: ${{ inputs.time_limit_minutes }}
+      OMP_PROC_BIND: close
+      OMP_PLACES: cores
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install FFTW3 and OpenBLAS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfftw3-dev libopenblas-dev
+
+      - name: Configure
+        run: cmake --preset fftw-openblas
+
+      - name: Build
+        run: cmake --build --preset fftw-openblas -j "$(nproc)"
+
+      - name: Test
+        if: ${{ inputs.run_tests }}
+        run: ctest --preset fftw-openblas
+
+      - name: Simulate
+        run: |
+          mkdir -p run
+          nproc
+          free -h
+          df -h .
+          set +e
+          timeout --signal=INT --kill-after=2m "${LIMIT}m" \
+            ./build/fftw-openblas/uppe_thz_dc --data-dir data --out-dir run --z-max "$Z_MAX" --threads "$(nproc)" \
+            2>&1 | tee run/log.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          df -h .
+          du -sh run
+          if [ "$code" -eq 124 ]; then
+            echo "::warning::Stopped by the ${LIMIT}-minute time limit before z = ${Z_MAX} cm; results up to the last step are kept."
+          elif [ "$code" -ne 0 ]; then
+            exit "$code"
+          fi
+
+      - name: Pack results
+        if: always()
+        run: |
+          if [ -d run ]; then tar -czf results.tar.gz -C run .; fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uppe-zmax-${{ inputs.z_max }}-${{ github.run_id }}
+          path: results.tar.gz
+          if-no-files-found: ignore
+          retention-days: 90
+          compression-level: 0
