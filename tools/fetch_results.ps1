@@ -54,7 +54,8 @@ function Get-FreeGB {
 function Get-Assets {
   $json = & gh release view $release --repo $Repo --json assets 2>$null
   if ($LASTEXITCODE -ne 0) { return $null }
-  return @(($json | Out-String | ConvertFrom-Json).assets)
+  # The comma keeps an empty asset list from being unrolled into $null.
+  return , @(($json | Out-String | ConvertFrom-Json).assets)
 }
 
 function Show-Status {
