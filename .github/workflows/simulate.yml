@@ -26,7 +26,7 @@ on:
         required: false
         default: ""
       run_flags:
-        description: "Extra program options, pinned for the chain: --snap-dz-cm <cm>, --linear"
+        description: "Extra program options, pinned for the chain: --snap-dz-cm <cm>, --dphi-max <rad>, --linear"
         required: false
         default: ""
       tag:
@@ -112,18 +112,18 @@ jobs:
             [[ "$t" =~ ^-DUPPE_(ENERGY_MJ|PRELENS_CM|A0_CM|RMAX|NR_OPT)=[0-9]+(\.[0-9]+)?$ ]] \
               || { echo "::error::bad build_flags token '$t'"; exit 1; }
           done
-          expect_value=0
+          expect_value=""
           for t in $RUN_FLAGS; do
-            if [ "$expect_value" = 1 ]; then
-              [[ "$t" =~ $num ]] || { echo "::error::bad --snap-dz-cm value '$t'"; exit 1; }
-              expect_value=0
-            elif [ "$t" = --snap-dz-cm ]; then
-              expect_value=1
+            if [ -n "$expect_value" ]; then
+              [[ "$t" =~ $num ]] || { echo "::error::bad $expect_value value '$t'"; exit 1; }
+              expect_value=""
+            elif [ "$t" = --snap-dz-cm ] || [ "$t" = --dphi-max ]; then
+              expect_value="$t"
             elif [ "$t" != --linear ]; then
               echo "::error::bad run_flags token '$t'"; exit 1
             fi
           done
-          [ "$expect_value" = 0 ] || { echo "::error::--snap-dz-cm needs a value"; exit 1; }
+          [ -z "$expect_value" ] || { echo "::error::$expect_value needs a value"; exit 1; }
           printf 'SEG2=%02d\n' "$SEGMENT" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v7

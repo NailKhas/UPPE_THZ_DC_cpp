@@ -1,5 +1,6 @@
 #include "simulation.hpp"
 
+#include <cmath>
 #include <cstdio>
 #include <memory>
 #include <stdexcept>
@@ -117,6 +118,18 @@ void add_to(cplx* E, const cplx* K, std::size_t n) {
     const std::size_t b = static_cast<std::size_t>(ci) * chunk;
     const std::size_t e = std::min(n, b + chunk);
     for (std::size_t j = b; j < e; ++j) E[j] += K[j];
+  }
+}
+
+void scale_by(cplx* K, std::size_t n, double s) {
+  const long long nn = static_cast<long long>(n);
+  const int chunk = 1 << 16;
+  const int nchunks = static_cast<int>((nn + chunk - 1) / chunk);
+#pragma omp parallel for schedule(static)
+  for (int ci = 0; ci < nchunks; ++ci) {
+    const std::size_t b = static_cast<std::size_t>(ci) * chunk;
+    const std::size_t e = std::min(n, b + chunk);
+    for (std::size_t j = b; j < e; ++j) K[j] *= s;
   }
 }
 
@@ -255,6 +268,8 @@ RunStatus run_simulation(const RunConfig& cfg) {
   };
 
   const double k0a0a0 = c::k0 * c::a0 * c::a0;
+  // Plasma phase k0*Ne/(2*Ncr) at the carrier per unit z (in Ldifr) and per unit Ne (in N0).
+  const double plasma_rate = ph.RDru * kplasma_factor() / (c::w0 * c::t0);
   RunStatus status = RunStatus::Stopped;
   double max_step_time = 0.0;
   if (cfg.linear) std::printf(" Linear run: the nonlinear response is switched off\n");
@@ -338,6 +353,8 @@ RunStatus run_simulation(const RunConfig& cfg) {
     std::printf(" %14.7g Energy = %.15g\n", static_cast<double>(static_cast<float>(z * c::Ldifr)), Energy);
     fEnergy.d(z * c::Ldifr).d(Energy).nl();
     fEnergy.flush();
+    if (!(Imax > 0.0) || !std::isfinite(Imax) || !std::isfinite(Energy))
+      throw std::runtime_error("the field is not finite at z = " + std::to_string(z * c::Ldifr) + " cm");
 
     // First RK stage
     if (!cfg.linear) run_nonlinear(dz);
@@ -347,6 +364,16 @@ RunStatus run_simulation(const RunConfig& cfg) {
     std::printf(" %14.7g Ne_max = %.15g\n", static_cast<double>(static_cast<float>(z * c::Ldifr)), Nemax);
     fNemax.d(z * c::Ldifr).d(Nemax).nl();
     fNemax.flush();
+
+    // The first-stage k is proportional to dz, so a shorter step only rescales it.
+    if (cfg.dphi_max && Nemax > 0.0) {
+      const double dz_pl = *cfg.dphi_max / (plasma_rate * Nemax);
+      if (dz_pl < dz) {
+        scale_by(Kr_O.data(), nO, dz_pl / dz);
+        scale_by(Kr_T.data(), static_cast<std::size_t>(nrO) * nqT, dz_pl / dz);
+        dz = dz_pl;
+      }
+    }
     std::printf(" ----------------------------------------------------------- \n");
 
     if (fluence) {

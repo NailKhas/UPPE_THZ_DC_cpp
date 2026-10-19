@@ -20,6 +20,7 @@ struct RunConfig {
   std::optional<double> min_free_bytes;   // stop once the free space on out_dir's disk drops below this
   std::optional<double> snap_dz_cm;       // uniform snapshot interval, cm; empty = 0.25 cm and 0.1 cm in 19-20.2 cm
   bool linear = false;                    // skip the nonlinear response: linear propagation of the incident field
+  std::optional<double> dphi_max;         // cap of the plasma phase per step at the carrier, rad; empty = Fortran dz
   const volatile std::sig_atomic_t* stop_flag = nullptr;  // nonzero = stop after the current step
 };
 

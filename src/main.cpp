@@ -36,6 +36,7 @@ void usage() {
       "  --max-steps <n>       stop after n z steps in total\n"
       "  --snap-dz-cm <cm>     write snapshots every <cm> (default: 0.25 cm, 0.1 cm between 19 and 20.2 cm)\n"
       "  --linear              switch the nonlinear response off (linear reference run)\n"
+      "  --dphi-max <rad>      shorten dz so that the plasma phase per step at the carrier stays below <rad>\n"
       "Exit code: 0 when --z-max is reached, %d when the run stopped early, 1 on error.\n",
       kExitContinue);
 }
@@ -81,6 +82,10 @@ int main(int argc, char** argv) {
         cfg.snap_dz_cm = s;
       } else if (opt == "--linear") {
         cfg.linear = true;
+      } else if (opt == "--dphi-max") {
+        const double p = std::stod(value());
+        if (!(p > 0.0)) throw std::runtime_error("--dphi-max must be positive");
+        cfg.dphi_max = p;
       } else if (opt == "-h" || opt == "--help") {
         usage();
         return 0;
