@@ -34,6 +34,8 @@ void usage() {
       "  --wall-limit-min <m>  stop before the run exceeds m minutes of wall time\n"
       "  --min-free-gb <g>     stop once less than g GB (1e9 bytes) are free on the disk of --out-dir\n"
       "  --max-steps <n>       stop after n z steps in total\n"
+      "  --snap-dz-cm <cm>     write snapshots every <cm> (default: 0.25 cm, 0.1 cm between 19 and 20.2 cm)\n"
+      "  --linear              switch the nonlinear response off (linear reference run)\n"
       "Exit code: 0 when --z-max is reached, %d when the run stopped early, 1 on error.\n",
       kExitContinue);
 }
@@ -73,6 +75,12 @@ int main(int argc, char** argv) {
         cfg.min_free_bytes = g * 1e9;
       } else if (opt == "--max-steps") {
         cfg.max_steps = std::stoll(value());
+      } else if (opt == "--snap-dz-cm") {
+        const double s = std::stod(value());
+        if (!(s > 0.0)) throw std::runtime_error("--snap-dz-cm must be positive");
+        cfg.snap_dz_cm = s;
+      } else if (opt == "--linear") {
+        cfg.linear = true;
       } else if (opt == "-h" || opt == "--help") {
         usage();
         return 0;

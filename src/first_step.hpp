@@ -10,7 +10,8 @@
 namespace uppe {
 
 // FirstStep: the incident pulse is apertured, propagated by dz0, focused, propagated by dz,
-// all on the large radial grid g (nR = 16000 in production).
+// all on the large radial grid g (nR = 16000 in production). dz0 = 0 applies the lens to the source profile
+// directly, without the angular filter of the propagation step.
 // Writes the result Ebuf(w,r) for the first nrKeep radial points into eOut ([nrKeep][ntO/2],
 // zero-initialized by the caller), plus SpSIC.dat and Incident.dat in outDir.
 void first_step(const TimeFreq& tf, const Band& bandO, const RadialGrid& g, const HankelMatrix& H, double vg,

@@ -15,7 +15,7 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr char kMagic[8] = {'U', 'P', 'P', 'E', 'C', 'K', 'P', 'T'};
-constexpr std::int32_t kVersion = 3;
+constexpr std::int32_t kVersion = 4;
 constexpr std::uint64_t kHashSeed = 0xcbf29ce484222325ULL;
 
 struct Header {
@@ -27,6 +27,7 @@ struct Header {
   double z, z_flag, Imax;
   std::uint64_t nO, nT;
   double focus, zsic;
+  double prelens, a0, Rmax, WW0;
 };
 
 // FNV-1a over 64-bit words: only detects truncated or damaged files.
@@ -97,6 +98,10 @@ void write_checkpoint(const fs::path& file, const Sizes& sizes, const LoopState&
   h.nT = E_T.size();
   h.focus = c::focus;
   h.zsic = c::zsic;
+  h.prelens = c::prelens;
+  h.a0 = c::a0;
+  h.Rmax = c::Rmax;
+  h.WW0 = c::WW0;
 
   const std::size_t bytesO = E_O.size() * sizeof(cplx);
   const std::size_t bytesT = E_T.size() * sizeof(cplx);
@@ -131,6 +136,12 @@ LoopState read_checkpoint(const fs::path& file, const Sizes& sizes, AlignedArray
     throw std::runtime_error("checkpoint " + name + " was written for focus " + std::to_string(h.focus) +
                              " cm, zsic " + std::to_string(h.zsic) + " cm; this build has focus " +
                              std::to_string(c::focus) + " cm, zsic " + std::to_string(c::zsic) + " cm");
+  if (h.prelens != c::prelens || h.a0 != c::a0 || h.Rmax != c::Rmax || h.WW0 != c::WW0)
+    throw std::runtime_error("checkpoint " + name + " was written for prelens " + std::to_string(h.prelens) +
+                             " cm, a0 " + std::to_string(h.a0) + " cm, Rmax " + std::to_string(h.Rmax) + ", W0 " +
+                             std::to_string(h.WW0 * 1e3) + " mJ; this build has prelens " +
+                             std::to_string(c::prelens) + " cm, a0 " + std::to_string(c::a0) + " cm, Rmax " +
+                             std::to_string(c::Rmax) + ", W0 " + std::to_string(c::WW0 * 1e3) + " mJ");
 
   const std::size_t bytesO = E_O.size() * sizeof(cplx);
   const std::size_t bytesT = E_T.size() * sizeof(cplx);

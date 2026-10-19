@@ -17,7 +17,11 @@ inline constexpr double N0 = 2.7e19;
 inline constexpr double tmin_THz = -800.0;
 inline constexpr double tmax_THz = 800.0;
 
-inline constexpr double Rmax = 20.0;
+// Radius of the optical grid in units of a0; -DUPPE_RMAX=<value> (the Fortran value is 20).
+#ifndef UPPE_RMAX
+#define UPPE_RMAX 20.0
+#endif
+inline constexpr double Rmax = UPPE_RMAX;
 
 // Focal distance, cm; set at configure time with -DUPPE_FOCUS_CM=<cm> (the Fortran value is 20).
 #ifndef UPPE_FOCUS_CM
@@ -30,11 +34,24 @@ inline constexpr double focus = UPPE_FOCUS_CM;
 #endif
 inline constexpr double zsic = UPPE_ZSIC_CM;
 static_assert(zsic < focus, "zsic must be less than focus");
+// Free path of the source beam before the lens, cm; -DUPPE_PRELENS_CM=<cm> (the Fortran value is 400, 0 puts the
+// source profile right at the lens).
+#ifndef UPPE_PRELENS_CM
+#define UPPE_PRELENS_CM 400.0
+#endif
+inline constexpr double prelens = UPPE_PRELENS_CM;
+static_assert(prelens >= 0, "prelens must be non-negative");
 inline constexpr double t1 = 44.0e-15;
 inline constexpr double t0 = 54.0e-15;
 inline constexpr double t00 = 20.4e-15;
 inline constexpr double a00 = 0.1;
+// Length unit of r, z and of the radial grids, cm; -DUPPE_A0_CM=<cm>. The Fortran value a00*(1 - zsic/focus)
+// ties the grid to zsic.
+#ifdef UPPE_A0_CM
+inline constexpr double a0 = UPPE_A0_CM;
+#else
 inline constexpr double a0 = a00 * (1 - zsic / focus);
+#endif
 inline constexpr double err = static_cast<double>(1e-12f);
 
 inline constexpr double lmbd0 = 744e-7;
@@ -56,18 +73,27 @@ inline constexpr double n2 = 1.0e-19;
 inline constexpr double WN2 = 15.5;
 inline constexpr double WO2 = 12.2;
 
-inline constexpr double WW0 = 0.5e-3;
+// Pulse energy, J; -DUPPE_ENERGY_MJ=<mJ> (the Fortran value is 0.5 mJ).
+#ifndef UPPE_ENERGY_MJ
+#define UPPE_ENERGY_MJ 0.5
+#endif
+inline constexpr double WW0 = UPPE_ENERGY_MJ * 1e-3;
 
 // InitConsts reads indices 0..9998 of P_N2/P_O2 from N2.dat/O2.dat.
 inline constexpr int ion_table_size = 9999;
 
 }  // namespace c
 
+// Number of optical radial nodes; -DUPPE_NR_OPT=<n> (the Fortran value is 1000).
+#ifndef UPPE_NR_OPT
+#define UPPE_NR_OPT 1000
+#endif
+
 // Grid sizes. The defaults are the Fortran parameters; tests use smaller grids.
 struct Sizes {
   int nt_all = 1024 * 16 * 32;
   int nR_first = 16000;  // initial value of nR, used by FirstStep
-  int nR_opt = 1000;
+  int nR_opt = UPPE_NR_OPT;
   int nR_THz = 5000;
 };
 

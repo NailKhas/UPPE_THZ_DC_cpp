@@ -15,12 +15,19 @@ option(UPPE_NATIVE "Optimize for the CPU of the build machine" ON)
 option(UPPE_BUILD_TESTS "Build unit tests" ON)
 set(UPPE_FOCUS_CM "20.0" CACHE STRING "Focal distance in cm (compile-time constant c::focus)")
 set(UPPE_ZSIC_CM "18.0" CACHE STRING "Start distance of the propagation in cm (compile-time constant c::zsic)")
+set(UPPE_PRELENS_CM "400.0" CACHE STRING "Free path of the source beam before the lens in cm, 0 allowed (c::prelens)")
+set(UPPE_ENERGY_MJ "0.5" CACHE STRING "Pulse energy in mJ (c::WW0)")
+set(UPPE_A0_CM "" CACHE STRING "Length unit a0 in cm (c::a0); empty = a00*(1 - zsic/focus) as in the Fortran")
+set(UPPE_RMAX "20.0" CACHE STRING "Optical grid radius in units of a0 (c::Rmax)")
+set(UPPE_NR_OPT "1000" CACHE STRING "Number of optical radial nodes (default of Sizes::nR_opt)")
 
-# Checks that ${var} is a positive number and sets ${out} to it as a C++ double literal.
+# Checks that ${var} is a positive (or, with ALLOW_ZERO, non-negative) number and sets ${out} to it as a
+# C++ double literal.
 function(uppe_double_literal var out)
+  cmake_parse_arguments(PARSE_ARGV 2 arg "ALLOW_ZERO" "" "")
   set(v "${${var}}")
-  if(NOT v MATCHES "^[0-9]+(\\.[0-9]*)?$" OR v MATCHES "^0*(\\.0*)?$")
-    message(FATAL_ERROR "${var} must be a positive number, got '${v}'")
+  if(NOT v MATCHES "^[0-9]+(\\.[0-9]*)?$" OR (NOT arg_ALLOW_ZERO AND v MATCHES "^0*(\\.0*)?$"))
+    message(FATAL_ERROR "${var} must be a positive number (or 0 where allowed), got '${v}'")
   endif()
   if(NOT v MATCHES "\\.")
     set(v "${v}.")
@@ -29,7 +36,26 @@ function(uppe_double_literal var out)
 endfunction()
 uppe_double_literal(UPPE_FOCUS_CM _uppe_focus_literal)
 uppe_double_literal(UPPE_ZSIC_CM _uppe_zsic_literal)
-message(STATUS "Focal distance: ${UPPE_FOCUS_CM} cm, start distance zsic: ${UPPE_ZSIC_CM} cm")
+uppe_double_literal(UPPE_PRELENS_CM _uppe_prelens_literal ALLOW_ZERO)
+uppe_double_literal(UPPE_ENERGY_MJ _uppe_energy_literal)
+uppe_double_literal(UPPE_RMAX _uppe_rmax_literal)
+if(NOT UPPE_NR_OPT MATCHES "^[1-9][0-9]*$" OR UPPE_NR_OPT LESS 3)
+  message(FATAL_ERROR "UPPE_NR_OPT must be an integer >= 3, got '${UPPE_NR_OPT}'")
+endif()
+set(_uppe_defs
+  UPPE_FOCUS_CM=${_uppe_focus_literal}
+  UPPE_ZSIC_CM=${_uppe_zsic_literal}
+  UPPE_PRELENS_CM=${_uppe_prelens_literal}
+  UPPE_ENERGY_MJ=${_uppe_energy_literal}
+  UPPE_RMAX=${_uppe_rmax_literal}
+  UPPE_NR_OPT=${UPPE_NR_OPT})
+if(NOT UPPE_A0_CM STREQUAL "")
+  uppe_double_literal(UPPE_A0_CM _uppe_a0_literal)
+  list(APPEND _uppe_defs UPPE_A0_CM=${_uppe_a0_literal})
+endif()
+message(STATUS "Focal distance: ${UPPE_FOCUS_CM} cm, start distance zsic: ${UPPE_ZSIC_CM} cm, "
+               "path before the lens: ${UPPE_PRELENS_CM} cm, energy: ${UPPE_ENERGY_MJ} mJ")
+message(STATUS "a0: ${UPPE_A0_CM} cm (empty = a00*(1 - zsic/focus)), Rmax: ${UPPE_RMAX}, nR_opt: ${UPPE_NR_OPT}")
 
 find_package(OpenMP REQUIRED COMPONENTS CXX)
 
@@ -48,7 +74,7 @@ add_library(uppe_core STATIC
 )
 target_include_directories(uppe_core PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(uppe_core PUBLIC OpenMP::OpenMP_CXX)
-target_compile_definitions(uppe_core PUBLIC UPPE_FOCUS_CM=${_uppe_focus_literal} UPPE_ZSIC_CM=${_uppe_zsic_literal})
+target_compile_definitions(uppe_core PUBLIC ${_uppe_defs})
 
 # The port follows the Fortran operation order and IEEE semantics, so value-changing
 # floating-point optimizations (-ffast-math, /fp:fast, icx default -fp-model=fast) must stay off.

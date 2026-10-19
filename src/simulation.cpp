@@ -182,7 +182,7 @@ RunStatus run_simulation(const RunConfig& cfg) {
     {
       const RadialGrid g1 = make_radial(roots, sz.nR_first, sz.nR_opt, RadialKind::First);
       const HankelMatrix H1 = make_hankel(roots, sz.nR_first);
-      const double dz0 = 400. / c::Ldifr;
+      const double dz0 = c::prelens / c::Ldifr;
       first_step(tf, bandO, g1, H1, disp.vg, dz, dz0, nrO, E_O.data(), out);
     }
     z = z + dz;
@@ -257,6 +257,7 @@ RunStatus run_simulation(const RunConfig& cfg) {
   const double k0a0a0 = c::k0 * c::a0 * c::a0;
   RunStatus status = RunStatus::Stopped;
   double max_step_time = 0.0;
+  if (cfg.linear) std::printf(" Linear run: the nonlinear response is switched off\n");
   std::printf(" --- Start propagation ---\n");
   for (;;) {
     const double wall0 = omp_get_wtime();
@@ -267,7 +268,9 @@ RunStatus run_simulation(const RunConfig& cfg) {
     int z_pos = 0;
     std::fill(Fl.begin(), Fl.end(), 0.0);
     if (z >= z_flag) {
-      if ((z < 19. / k0a0a0) || (z >= static_cast<double>(20.2f) / k0a0a0)) {
+      if (cfg.snap_dz_cm) {
+        z_flag = z_flag + *cfg.snap_dz_cm / k0a0a0;
+      } else if ((z < 19. / k0a0a0) || (z >= static_cast<double>(20.2f) / k0a0a0)) {
         z_flag = z_flag + 0.25 / k0a0a0;
       } else {
         z_flag = z_flag + static_cast<double>(0.1f) / k0a0a0;
@@ -287,8 +290,9 @@ RunStatus run_simulation(const RunConfig& cfg) {
     const bool fluence = static_cast<bool>(snap);
 
     // Ebuf = E_THz; HnkThread(E_THz, Ebuf)
-    hankel_spectral(HT, HankelInput{E_T.data(), nullptr, 0.0, nrT}, B_T.data(), fluence ? nrT : nrO, nqT,
-                    PT.cut.data(), nullptr);
+    if (fluence || !cfg.linear)
+      hankel_spectral(HT, HankelInput{E_T.data(), nullptr, 0.0, nrT}, B_T.data(), fluence ? nrT : nrO, nqT,
+                      PT.cut.data(), nullptr);
     if (fluence) {
       radial_power(B_T.data(), nrT, nqT, gT, intSp);
       for (int q = 1; q < nqT; ++q) {
@@ -336,7 +340,7 @@ RunStatus run_simulation(const RunConfig& cfg) {
     fEnergy.flush();
 
     // First RK stage
-    run_nonlinear(dz);
+    if (!cfg.linear) run_nonlinear(dz);
 
     double Nemax = 0.0;
     for (int i = 0; i < nrO; ++i) Nemax = std::max(Nemax, neMax[i]);
@@ -353,17 +357,19 @@ RunStatus run_simulation(const RunConfig& cfg) {
       fSnaps.flush();
     }
 
-    to_kr_and_divide();
+    if (!cfg.linear) {
+      to_kr_and_divide();
 
-    // Second RK stage at E + k/2: Ebuf = E_THz + .5*k_THz, Et = E + .5*k
-    hankel_spectral(HT, HankelInput{E_T.data(), K_T.data(), .5, nrT}, B_T.data(), nrO, nqT, PT.cut.data(), nullptr);
-    hankel_spectral(HO, HankelInput{E_O.data(), K_O.data(), .5, nrO}, W_O.data(), nrO, nqO, nullptr, nullptr);
-    spectra_to_time(W_O.data(), nrO, nqO, Et_O.data(), ntO, fftO);
-    run_nonlinear(dz);
-    to_kr_and_divide();
+      // Second RK stage at E + k/2: Ebuf = E_THz + .5*k_THz, Et = E + .5*k
+      hankel_spectral(HT, HankelInput{E_T.data(), K_T.data(), .5, nrT}, B_T.data(), nrO, nqT, PT.cut.data(), nullptr);
+      hankel_spectral(HO, HankelInput{E_O.data(), K_O.data(), .5, nrO}, W_O.data(), nrO, nqO, nullptr, nullptr);
+      spectra_to_time(W_O.data(), nrO, nqO, Et_O.data(), ntO, fftO);
+      run_nonlinear(dz);
+      to_kr_and_divide();
 
-    add_to(E_O.data(), K_O.data(), nO);
-    add_to(E_T.data(), K_T.data(), nT);
+      add_to(E_O.data(), K_O.data(), nO);
+      add_to(E_T.data(), K_T.data(), nT);
+    }
 
     z = z + dz;
     iz = iz + 1;

@@ -100,6 +100,20 @@ int main() {
     if (static_cast<int>(got.size()) == n) CHECK(test::rel_err(got.data(), want.data(), got.size()) < 1e-9);
   }
 
+  // dz0 = 0: the lens acts on the source profile. The reference still applies the angular filter and two
+  // Hankel transforms, which change the field only at the round-off level of the transform pair.
+  {
+    std::vector<cplx> e0(eOut.size(), cplx(0.0, 0.0));
+    first_step(tf, b, g, H, vg, dz, 0.0, nrKeep, e0.data(), out);
+    ref::Kz K0 = ref::kz_tables(b, g, vg);
+    const ref::Vec R0 = ref::first_step(tf, b, g, RH, K0, dz, 0.0);
+    std::vector<cplx> expect0(e0.size());
+    for (int q = 0; q < nq; ++q)
+      for (int i = 0; i < nrKeep; ++i)
+        expect0[static_cast<std::size_t>(i) * nq + q] = R0[static_cast<std::size_t>(nq + q) * n + i];
+    CHECK(test::rel_err(e0.data(), expect0.data(), e0.size()) < 1e-8);
+  }
+
   fs::remove_all(out);
   return test::finish("test_first_step");
 }

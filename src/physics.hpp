@@ -15,7 +15,9 @@ struct Physics {
   double RKer = 0;
   double RDru = 0;
   double ROhm = 0;
-  double zself = 0;
+  double zself = 0;  // Marburger collapse distance of the collimated source beam, cm; NaN below Pcr
+  double P = 0;      // peak power of the source pulse, W
+  double Pcr = 0;    // critical power of self-focusing, W
   double P_Pcr = 0;
   std::vector<double> P_N2, P_O2;  // ionization rate per 10 fs on an intensity grid of 1e11 W/cm^2
 };

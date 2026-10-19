@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -14,14 +15,21 @@ namespace uppe {
 
 Physics make_physics() {
   Physics p;
-  p.I0 = c::WW0 / sq(c::a00) / c::t0 / std::pow(c::pi, 1.5);
+  // Integral of exp(-2 (r/a00)^16) over the plane is pi*a00^2*S; the Fortran I0 omits S and puts
+  // 0.864*WW0 into the pulse.
+  const double S = std::tgamma(9. / 8) / std::pow(2., 1. / 8);
+  p.I0 = c::WW0 / sq(c::a00) / c::t0 / std::pow(c::pi, 1.5) / S;
   p.DC_Field_in_kV = static_cast<double>(4.f / 0.4f);
   p.DC_Field = p.DC_Field_in_kV * std::sqrt(static_cast<double>(31000 / 5.15f / 5.15f) / p.I0);
   p.RKer = c::n2 * p.I0 * 4. / 3;
   p.RDru = 2 * c::pi * sq(c::el) * c::N0 * sq(c::t0) / c::me;
   p.ROhm = c::cL * static_cast<double>(1.6e-19f) * c::N0 / 4. / p.I0;
-  p.P_Pcr = p.I0 * sq(c::a0) * c::pi * 8 * c::pi * c::n2 / (3.77f * sq(c::lmbd0));
-  p.zself = 0.367f * c::k0 * c::a0 * c::a0 / std::sqrt(sq(std::sqrt(p.P_Pcr) - 0.852f) - 0.0219f);
+  p.P = c::WW0 / (std::sqrt(c::pi) * c::t0);
+  p.Pcr = 3.77 * sq(c::lmbd0) / (8 * c::pi * c::n2);
+  p.P_Pcr = p.P / p.Pcr;
+  // Marburger's fit holds only above the critical power.
+  p.zself = p.P_Pcr > 1.0 ? 0.367 * c::k0 * sq(c::a00) / std::sqrt(sq(std::sqrt(p.P_Pcr) - 0.852) - 0.0219)
+                          : std::numeric_limits<double>::quiet_NaN();
   return p;
 }
 
@@ -69,6 +77,7 @@ void write_params(const Physics& ph, double ng, double d2kdw2, int nthreads, con
   both("a00     = ", c::a00, " cm");
   both("W0      = ", c::WW0 * 1e3, " mJ");
   both("Focus   = ", c::focus, " cm");
+  both("Prelens = ", c::prelens, " cm");
   both("zsic   = ", c::zsic, " cm");
   both("DC field = ", ph.DC_Field_in_kV, " kV/cm");
   file_line(" ");
@@ -77,12 +86,20 @@ void write_params(const Physics& ph, double ng, double d2kdw2, int nthreads, con
   both("a0      = ", c::a0, " cm");
   file_value("k0      = ", c::k0, " cm^(-1)");
   both("Ldifr   = ", c::k0 * c::a0 * c::a0, " cm");
+  both("Rmax    = ", c::Rmax * c::a0, " cm");
   file_line(" ");
   file_line("Model parameters:");
   both("ng      = ", ng, "");
   both("Ldisp   = ", c::cL * c::t0 / d2kdw2, " cm");
   file_value("n2      = ", c::n2, " cm^2/W");
-  both("zself   = ", ph.zself, " cm");
+  both("P       = ", ph.P * 1e-9, " GW");
+  both("Pcr     = ", ph.Pcr * 1e-9, " GW");
+  if (std::isfinite(ph.zself)) {
+    both("zself   = ", ph.zself, " cm");
+  } else {
+    std::printf(" zself   = n/a (P < Pcr)\n");
+    file_line("zself   = n/a (P < Pcr)");
+  }
   both("P/Pcr   = ", ph.P_Pcr, "");
   file_line("Paralleled:");
   const float memory = 1.f * sizes.nR_THz * tf.ntT * 16 + 1.f * sizes.nR_opt * tf.ntO * 16;

@@ -100,10 +100,14 @@ void first_step(const TimeFreq& tf, const Band& bandO, const RadialGrid& g, cons
       const double g16 = std::exp(-(pow16(g.r1[i] * c::a0) / a00_16));
       for (int a = 0; a < nA; ++a) X[static_cast<std::size_t>(i) * nA + a] = O[active[a]] * g16;
     }
-    hankel_dense(H, Xd, Yd, ncols);
-    propagate(Y.data(), X.data(), n, active, bandO, g, vg, dz0);
-    hankel_dense(H, Xd, Yd, ncols);
-    lens(Y.data(), X.data(), n, active, bandO, g);
+    if (dz0 != 0.0) {
+      hankel_dense(H, Xd, Yd, ncols);
+      propagate(Y.data(), X.data(), n, active, bandO, g, vg, dz0);
+      hankel_dense(H, Xd, Yd, ncols);
+      lens(Y.data(), X.data(), n, active, bandO, g);
+    } else {
+      lens(X.data(), X.data(), n, active, bandO, g);
+    }
     hankel_dense(H, Xd, Yd, ncols);
     propagate(Y.data(), X.data(), n, active, bandO, g, vg, dz);
     hankel_dense(H, Xd, Yd, ncols);
