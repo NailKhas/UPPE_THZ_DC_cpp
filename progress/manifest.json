@@ -1,24 +1,24 @@
 {
-  "snapshot_utc": "2026-10-20T11:21:51.105545+00:00",
-  "snapshot_berlin": "2026-10-20T13:21:51.105545+02:00",
+  "snapshot_utc": "2026-10-20T12:11:14.039302+00:00",
+  "snapshot_berlin": "2026-10-20T14:11:14.039302+02:00",
   "baseline_git_head": "7023ffe67e2736aa0bee645525a607d317d2e59d",
   "simulation_uses_local_source_modifications": true,
   "publication_scope": "plots, plotting script, scalar histories and provenance; simulation implementation is not included in this snapshot branch",
   "runs": [
     {
       "run": "f20_rk2ip",
-      "points": 223,
+      "points": 311,
       "first_z_cm": 18.0,
-      "last_z_cm": 19.211667594420497,
+      "last_z_cm": 19.457984912786824,
       "target_z_cm": 22,
       "finished": false,
       "initial_source_archive_sha256": "7f7c39a48b9ce25290a4bb113f5d642134b1723b11795e28ccced00757da02d0"
     },
     {
       "run": "f100_rk2ip",
-      "points": 112,
+      "points": 154,
       "first_z_cm": 1.0,
-      "last_z_cm": 6.549999999999981,
+      "last_z_cm": 8.649999999999967,
       "target_z_cm": 110,
       "finished": false,
       "initial_source_archive_sha256": "f45f50793ece6a7e23041bee39f528f8218e6002c0b01c83498a9ce2eef319cc"
