@@ -1,0 +1,55 @@
+{
+  "sim-f100-z1-E5-nopre": {
+    "source": "https://github.com/NailKhas/UPPE_THZ_DC_cpp/releases/tag/sim-f100-z1-E5-nopre",
+    "tag_commit": "c5040100c159eec0a56bc1b169265e6625f3f41d",
+    "physical": {
+      "focus_cm": 100,
+      "energy_mJ": 5,
+      "zsic_cm": 1,
+      "prelens_cm": 0,
+      "a0_cm": 0.01,
+      "Rmax_cm": 0.4,
+      "nR_opt": 2000,
+      "I0_GW_cm2": 1925.519506380694
+    },
+    "release_build_flags": "-DUPPE_ENERGY_MJ=5 -DUPPE_PRELENS_CM=0 -DUPPE_A0_CM=0.01 -DUPPE_RMAX=40 -DUPPE_NR_OPT=2000",
+    "release_run_flags": "--snap-dz-cm 0.5",
+    "observed_late_plasma_carrier_phase_rad": 0.005,
+    "note": "Release tag/description belongs to earlier code lacking dphi; final scalar history includes a later continuation with a strict 0.005-rad plasma limit. Actual SHA/flags of resumed segments are not fully recorded in downloadable logs.",
+    "archives_sha256": {
+      "grids.tar.gz": "5ec93ea36fe5517ed87a13dec9a1da0d4ecf255976398ceff07902a3810d196f",
+      "latest_seg01.tar.gz": "f48286a784d42637c8a311f33a6d44a246d69b96d37b71e1a9a09d356aa15396",
+      "latest_seg02.tar.gz": "2c0244b83c841d78cf33d3970608cd9f9c5d46b1a6be9caeaab473e6a47b1f4b",
+      "latest_seg04.tar.gz": "e0482bf56deba2c640ddfa5e2b1c870097a8100163b6eb2b9a2a7f739172277a",
+      "latest_seg03.tar.gz": "9d8312b231eaa1a318b6301360abed03e571cd02e276eefaad0792588cfc4c48"
+    }
+  },
+  "sim-z30-old": {
+    "source": "https://github.com/NailKhas/UPPE_THZ_DC_cpp/releases/tag/sim-z30-old",
+    "tag_commit": "4c8b929fff80e954d3bddeccc9f928d7ece9f06b",
+    "physical": {
+      "focus_cm": 20,
+      "energy_mJ": 0.5,
+      "zsic_cm": 18,
+      "prelens_cm": 400,
+      "a0_cm": 0.01,
+      "nR_opt": 1000,
+      "I0_GW_cm2": 166.2843723373068
+    },
+    "note": "Only z=18 to19.3107 is downloadable; this is NOT the full user-supplied UPPE_zmax22 plot (which reaches20.79). Uses older pre-normalization-fix code.",
+    "archives_sha256": {
+      "grids.tar.gz": "5e82af35604b321b364393c9ce10fee38d716233dee42d93a431628d245857c2",
+      "latest_seg01.tar.gz": "23162a7ce674983099a2ea59a9197258bdc7ff63bfcddd9c1ba8b6b9432bcbe6"
+    }
+  },
+  "UPPE_zmax22_Actions": {
+    "run_url": "https://github.com/NailKhas/UPPE_THZ_DC_cpp/actions/runs/39127290396",
+    "job_id": "117674984693",
+    "commit": "5d4170e3d456198f499adac9cf74cde3fc61166b",
+    "artifact_id": "12145503061",
+    "artifact_name": "uppe-zmax-22-39127290396",
+    "displayed_size": "8.33 GB",
+    "sha256": "866a3d2bb0808c7ea86ff9d85d4be39de176e4ac1e9bb48176cf454fa8753fca",
+    "retrieval_status": "not downloaded: GitHub HTTP artifact URL 404 in logged-out session; job logs explicitly require sign-in; api.github.com/nightly.link blocked by network proxy403. Native read-only Git authentication works but does not supply browser API session."
+  }
+}

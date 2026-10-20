@@ -1,0 +1,6 @@
+ integrator  rk2ip
+ linear  0
+ dz_max_cm  0.05
+ dphi_max  0.0025
+ steps.dat: z_cm dz_cm Imax_over_I0 Nemax_over_N0 Kerr_phase plasma_carrier_phase
+ OpticalDiagnostics.dat: z_cm I1_envelope_over_I0 I1_crest_over_I0 P3_over_P1 r_peak_cm

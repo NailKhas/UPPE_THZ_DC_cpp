@@ -1,0 +1,58 @@
+[
+  {
+    "label": "Исходный f=20 (часть18–19,31 см)",
+    "focus": 20.0,
+    "energy_mJ": 0.5,
+    "I0_TW": 0.1662843723373068,
+    "original": true,
+    "path": "original/sim-z30-old/latest_seg01/res",
+    "I_rows": 255,
+    "Ne_rows": 254,
+    "z_first_cm": 18.0,
+    "z_last_cm": 19.31072414608519,
+    "peak_I_TW_cm2": 22.898731248251394,
+    "peak_Ne_over_N0": 7.069404838477844e-06
+  },
+  {
+    "label": "Исходный f=100",
+    "focus": 100.0,
+    "energy_mJ": 5.0,
+    "I0_TW": 1.9255195063806942,
+    "original": true,
+    "path": "original/sim-f100-z1-E5-nopre/latest_seg04/res",
+    "I_rows": 1954,
+    "Ne_rows": 1954,
+    "z_first_cm": 1.0,
+    "z_last_cm": 63.08344395358286,
+    "peak_I_TW_cm2": 72.24430091705658,
+    "peak_Ne_over_N0": 0.003004469950576629
+  },
+  {
+    "label": "f20_rk2ip (начальный участок, расчёт идёт, z≤19.2 см)",
+    "focus": 20.0,
+    "energy_mJ": 0.5,
+    "I0_TW": 0.1925519506380694,
+    "original": false,
+    "path": "f20_rk2ip/res",
+    "I_rows": 223,
+    "Ne_rows": 223,
+    "z_first_cm": 18.0,
+    "z_last_cm": 19.211667594420497,
+    "peak_I_TW_cm2": 23.38495931731716,
+    "peak_Ne_over_N0": 8.481509146858191e-06
+  },
+  {
+    "label": "f100_rk2ip (начальный участок, расчёт идёт, z≤6.55 см)",
+    "focus": 100.0,
+    "energy_mJ": 5.0,
+    "I0_TW": 1.9255195063806942,
+    "original": false,
+    "path": "f100_rk2ip/res",
+    "I_rows": 112,
+    "Ne_rows": 112,
+    "z_first_cm": 1.0,
+    "z_last_cm": 6.549999999999981,
+    "peak_I_TW_cm2": 2.3033343921800706,
+    "peak_Ne_over_N0": 3.5711877899302634e-13
+  }
+]

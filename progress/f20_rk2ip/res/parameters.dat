@@ -1,0 +1,36 @@
+ X-DOT by filamentators. FME for optical
+ First harmonic pulse:
+ lmbd0   =  744.0000000000001  nm
+ t0      =  54  fs
+ a00     =  0.1  cm
+ W0      =  0.5  mJ
+ Focus   =  20  cm
+ Prelens =  400  cm
+ zsic   =  18  cm
+ DC field =  10  kV/cm
+  
+ All is normalized to:
+ I0      =  192.5519506380694  GW/cm^2
+ a0      =  0.009999999999999998  cm
+ k0      =  84451.41541935483  cm^(-1)
+ Ldifr   =  8.445141541935481  cm
+ Rmax    =  0.19999999999999996  cm
+ nt_all  =  524288 
+ ntO     =  8192 
+ ntT     =  16384 
+ nR_first =  16000 
+ nR_opt  =  1000 
+ nR_THz  =  5000 
+ dt      =  0.164794921875  fs
+  
+ Model parameters:
+ ng      =  0.00020999171349693005 
+ Ldisp   =  10331.820296664564  cm
+ n2      =  1e-19  cm^2/W
+ P       =  5.223977625433702  GW
+ Pcr     =  8.3032356120735  GW
+ zself   = n/a (P < Pcr)
+ P/Pcr   =  0.6291496314807282 
+ Paralleled:
+ Paralleling by  2
+ Memory: 1441792000
