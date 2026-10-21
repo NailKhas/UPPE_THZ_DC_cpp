@@ -28,31 +28,31 @@
     "peak_Ne_over_N0": 0.003004469950576629
   },
   {
-    "label": "f20_rk2ip (доступно z≤20 см)",
+    "label": "f20_rk2ip (доступно z≤20.8 см)",
     "focus": 20.0,
     "energy_mJ": 0.5,
     "I0_TW": 0.1925519506380694,
     "original": false,
     "path": "f20_rk2ip/res",
-    "I_rows": 623,
-    "Ne_rows": 623,
+    "I_rows": 3183,
+    "Ne_rows": 3183,
     "z_first_cm": 18.0,
-    "z_last_cm": 19.952157514430514,
-    "peak_I_TW_cm2": 66.6146044152623,
-    "peak_Ne_over_N0": 0.00513122374390728
+    "z_last_cm": 20.754253073550956,
+    "peak_I_TW_cm2": 102.80515163029226,
+    "peak_Ne_over_N0": 0.01746960725656159
   },
   {
-    "label": "f100_rk2ip (доступно z≤16.5 см)",
+    "label": "f100_rk2ip (доступно z≤56.4 см)",
     "focus": 100.0,
     "energy_mJ": 5.0,
     "I0_TW": 1.9255195063806942,
     "original": false,
     "path": "f100_rk2ip/res",
-    "I_rows": 311,
-    "Ne_rows": 311,
+    "I_rows": 1561,
+    "Ne_rows": 1561,
     "z_first_cm": 1.0,
-    "z_last_cm": 16.500000000000043,
-    "peak_I_TW_cm2": 3.6200917320228627,
-    "peak_Ne_over_N0": 1.1178766801123173e-11
+    "z_last_cm": 56.39891571007764,
+    "peak_I_TW_cm2": 59.92636419072548,
+    "peak_Ne_over_N0": 0.0025669722447256007
   }
 ]
