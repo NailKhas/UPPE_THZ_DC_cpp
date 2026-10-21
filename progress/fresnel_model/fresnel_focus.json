@@ -1,0 +1,30 @@
+{
+  "model": "linear scalar Fresnel diffraction; uniform circular pupil; paraxial ideal thin lens",
+  "a_cm": 0.1,
+  "wavelength_nm": 744.0000000000001,
+  "formula": "(f/z)^2 * sinc^2[(pi*N/2)*(f/z-1)], sinc(x)=sin(x)/x",
+  "normalization": "Each curve is divided by its own I(f); amplitudes are not equal incident-intensity comparisons.",
+  "created_local": "2026-10-21T14:36:19.500135+00:00",
+  "cases": [
+    {
+      "f_cm": 20.0,
+      "fresnel_number": 6.720430107526882,
+      "z_peak_cm": 19.491223644661705,
+      "z_peak_over_f": 0.9745611822330853,
+      "I_peak_over_If": 1.0265070387949318,
+      "I_focus_over_Iin": 445.75259789288134,
+      "I_peak_over_Iin": 457.5681792981696,
+      "d_Iratio_dz_at_f_per_cm": -0.09999999927651215
+    },
+    {
+      "f_cm": 100.0,
+      "fresnel_number": 1.3440860215053765,
+      "z_peak_cm": 69.45130721006129,
+      "z_peak_over_f": 0.6945130721006129,
+      "I_peak_over_If": 1.5416720084188826,
+      "I_focus_over_Iin": 17.830103915715256,
+      "I_peak_over_Iin": 27.488172114058123,
+      "d_Iratio_dz_at_f_per_cm": -0.01999999999807711
+    }
+  ]
+}

@@ -41,3 +41,7 @@
 ```sh
 python3 plot_focus_comparison.py --root . --auto --output .
 ```
+
+## Аналитическая дифракционная модель
+
+[Графики аналитической функции для f=20 и 100 см](fresnel_model/README.md)
