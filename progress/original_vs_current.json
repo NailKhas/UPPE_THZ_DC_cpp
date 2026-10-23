@@ -42,17 +42,17 @@
     "peak_Ne_over_N0": 0.02626366893553262
   },
   {
-    "label": "f100_rk2ip (доступно z≤58 см)",
+    "label": "f100_rk2ip (доступно z≤60.8 см)",
     "focus": 100.0,
     "energy_mJ": 5.0,
     "I0_TW": 1.9255195063806942,
     "original": false,
     "path": "f100_rk2ip/res",
-    "I_rows": 2605,
-    "Ne_rows": 2605,
+    "I_rows": 3818,
+    "Ne_rows": 3818,
     "z_first_cm": 1.0,
-    "z_last_cm": 58.0377282051111,
-    "peak_I_TW_cm2": 70.96639435525131,
+    "z_last_cm": 60.82542810831107,
+    "peak_I_TW_cm2": 71.27919945256816,
     "peak_Ne_over_N0": 0.003002013089156837
   }
 ]
