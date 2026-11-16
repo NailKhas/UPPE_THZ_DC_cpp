@@ -25,6 +25,7 @@ struct NonlinearInputs {
   const double* et = nullptr;   // optical field Et(t,r), [nr][ntO]
   int nr = 0;                   // nR_opt - 1
   double dz = 0.0;
+  double dc = 0.0;              // external DC field at the z of this RK stage, dc_field(ph, z_cm)
   cplx* k_opt = nullptr;        // out: k(w,r), [nr][nqO]
   cplx* k_thz = nullptr;        // out: k_THz(w,r), [nr][nqT]
   double* ne_max = nullptr;     // in/out: Ne_max(r), updated with max

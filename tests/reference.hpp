@@ -158,12 +158,11 @@ struct JefResult {
   long long ionizing_samples = 0;
 };
 
-// JefThread_THz. ebuf: [ir][ntT] THz field (w,r); et: [ir][ntO] optical field (t,r).
+// JefThread_THz. ebuf: [ir][ntT] THz field (w,r); et: [ir][ntO] optical field (t,r); DC: external field.
 inline JefResult jef_thread(const uppe::TimeFreq& tf, const uppe::Physics& ph, const Vec& ebuf, const Vec& et,
-                            int nr, double dz) {
+                            int nr, double dz, double DC) {
   const int N = tf.nt_all, ntO = tf.ntO, ntT = tf.ntT;
   const double dt = tf.dt;
-  const double DC = ph.DC_Field;
   JefResult R;
   R.k.assign(static_cast<std::size_t>(nr) * ntO, cplx(0.0, 0.0));
   R.k_thz.assign(static_cast<std::size_t>(nr) * ntT, cplx(0.0, 0.0));

@@ -4,6 +4,7 @@ set(UPPE_TESTS
   test_hankel
   test_propagation
   test_nonlinear
+  test_dc_profile
   test_first_step
   test_simulation_smoke
   test_checkpoint
@@ -20,6 +21,7 @@ add_test(NAME fft COMMAND test_fft)
 add_test(NAME hankel COMMAND test_hankel)
 add_test(NAME propagation COMMAND test_propagation)
 add_test(NAME nonlinear COMMAND test_nonlinear)
+add_test(NAME dc_profile COMMAND test_dc_profile)
 add_test(NAME first_step COMMAND test_first_step)
 # The data directory is passed relative to the working directory, so non-ASCII
 # source paths never go through the command line.

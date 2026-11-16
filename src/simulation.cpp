@@ -237,8 +237,10 @@ RunStatus run_simulation(const RunConfig& cfg) {
   nl.k_thz = Kr_T.data();
   nl.ne_max = neMax.data();
 
-  auto run_nonlinear = [&](double step) {
+  // z_stage (in units of Ldifr) is where this RK stage samples the external field.
+  auto run_nonlinear = [&](double step, double z_stage) {
     nl.dz = step;
+    nl.dc = dc_field(ph, z_stage * c::Ldifr);
     const long long cnt = nonlinear_response(nl, nlws);
     if (cnt > 0 && clamped_total == 0)
       std::printf(" WARNING: I0*|E|^2 >= 1e15 W/cm^2 is beyond the N2.dat/O2.dat tables; "
@@ -267,7 +269,7 @@ RunStatus run_simulation(const RunConfig& cfg) {
     int z_pos = 0;
     std::fill(Fl.begin(), Fl.end(), 0.0);
     if (z >= z_flag) {
-      if ((z < 19. / k0a0a0) || (z >= static_cast<double>(20.2f) / k0a0a0)) {
+      if ((z < 19. / k0a0a0) || (z >= c::snap_dense_end / k0a0a0)) {
         z_flag = z_flag + 0.25 / k0a0a0;
       } else {
         z_flag = z_flag + static_cast<double>(0.1f) / k0a0a0;
@@ -335,14 +337,16 @@ RunStatus run_simulation(const RunConfig& cfg) {
     fEnergy.d(z * c::Ldifr).d(Energy).nl();
     fEnergy.flush();
 
-    // First RK stage
-    run_nonlinear(dz);
+    // First RK stage, field at z
+    run_nonlinear(dz, z);
 
     double Nemax = 0.0;
     for (int i = 0; i < nrO; ++i) Nemax = std::max(Nemax, neMax[i]);
     std::printf(" %14.7g Ne_max = %.15g\n", static_cast<double>(static_cast<float>(z * c::Ldifr)), Nemax);
     fNemax.d(z * c::Ldifr).d(Nemax).nl();
     fNemax.flush();
+    std::printf(" %14.7g DC = %.15g kV/cm\n", static_cast<double>(static_cast<float>(z * c::Ldifr)),
+                dc_field_kV(z * c::Ldifr));
     std::printf(" ----------------------------------------------------------- \n");
 
     if (fluence) {
@@ -359,7 +363,8 @@ RunStatus run_simulation(const RunConfig& cfg) {
     hankel_spectral(HT, HankelInput{E_T.data(), K_T.data(), .5, nrT}, B_T.data(), nrO, nqT, PT.cut.data(), nullptr);
     hankel_spectral(HO, HankelInput{E_O.data(), K_O.data(), .5, nrO}, W_O.data(), nrO, nqO, nullptr, nullptr);
     spectra_to_time(W_O.data(), nrO, nqO, Et_O.data(), ntO, fftO);
-    run_nonlinear(dz);
+    // The source depends on z through DC(z), so the midpoint stage samples it at z + dz/2.
+    run_nonlinear(dz, z + 0.5 * dz);
     to_kr_and_divide();
 
     add_to(E_O.data(), K_O.data(), nO);

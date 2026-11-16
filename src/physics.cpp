@@ -15,14 +15,24 @@ namespace uppe {
 Physics make_physics() {
   Physics p;
   p.I0 = c::WW0 / sq(c::a00) / c::t0 / std::pow(c::pi, 1.5);
-  p.DC_Field_in_kV = static_cast<double>(4.f / 0.4f);
-  p.DC_Field = p.DC_Field_in_kV * std::sqrt(static_cast<double>(31000 / 5.15f / 5.15f) / p.I0);
+  p.DC_norm = std::sqrt(static_cast<double>(31000 / 5.15f / 5.15f) / p.I0);
   p.RKer = c::n2 * p.I0 * 4. / 3;
   p.RDru = 2 * c::pi * sq(c::el) * c::N0 * sq(c::t0) / c::me;
   p.ROhm = c::cL * static_cast<double>(1.6e-19f) * c::N0 / 4. / p.I0;
   p.P_Pcr = p.I0 * sq(c::a0) * c::pi * 8 * c::pi * c::n2 / (3.77f * sq(c::lmbd0));
   p.zself = 0.367f * c::k0 * c::a0 * c::a0 / std::sqrt(sq(std::sqrt(p.P_Pcr) - 0.852f) - 0.0219f);
   return p;
+}
+
+double dc_field_kV(double z_cm) {
+  if constexpr (c::dc_profile == 0) {
+    (void)z_cm;
+    return static_cast<double>(4.f / 0.4f);
+  } else {
+    const double d = z_cm - c::dc_z0;
+    return c::dc_amp * (1.0 / (1.0 + std::exp(-c::dc_rate * d)) - 0.5) *
+           std::exp(-std::pow(std::abs(d / c::dc_width), c::dc_order));
+  }
 }
 
 namespace {
@@ -70,7 +80,15 @@ void write_params(const Physics& ph, double ng, double d2kdw2, int nthreads, con
   both("W0      = ", c::WW0 * 1e3, " mJ");
   both("Focus   = ", c::focus, " cm");
   both("zsic   = ", c::zsic, " cm");
-  both("DC field = ", ph.DC_Field_in_kV, " kV/cm");
+  if constexpr (c::dc_profile == 0) {
+    both("DC field = ", dc_field_kV(c::zsic), " kV/cm");
+  } else {
+    char profile[160];
+    std::snprintf(profile, sizeof profile, "DC field = %g*(1/(1+exp(-%g*(z-%g)))-1/2)*exp(-((z-%g)/%g)^%g) kV/cm",
+                  c::dc_amp, c::dc_rate, c::dc_z0, c::dc_z0, c::dc_width, c::dc_order);
+    std::printf(" %s\n", profile);
+    file_line(profile);
+  }
   file_line(" ");
   file_line("All is normalized to:");
   both("I0      = ", ph.I0 * 1e-9, " GW/cm^2");

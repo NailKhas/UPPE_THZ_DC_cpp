@@ -15,14 +15,14 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr char kMagic[8] = {'U', 'P', 'P', 'E', 'C', 'K', 'P', 'T'};
-constexpr std::int32_t kVersion = 3;
+constexpr std::int32_t kVersion = 4;
 constexpr std::uint64_t kHashSeed = 0xcbf29ce484222325ULL;
 
 struct Header {
   char magic[8];
   std::int32_t version;
   std::int32_t nt_all, nR_first, nR_opt, nR_THz;
-  std::int32_t reserved;
+  std::int32_t dc_profile;
   std::int64_t iz, clamped_total;
   double z, z_flag, Imax;
   std::uint64_t nO, nT;
@@ -88,6 +88,7 @@ void write_checkpoint(const fs::path& file, const Sizes& sizes, const LoopState&
   h.nR_first = sizes.nR_first;
   h.nR_opt = sizes.nR_opt;
   h.nR_THz = sizes.nR_THz;
+  h.dc_profile = c::dc_profile;
   h.iz = state.iz;
   h.clamped_total = state.clamped_total;
   h.z = state.z;
@@ -131,6 +132,10 @@ LoopState read_checkpoint(const fs::path& file, const Sizes& sizes, AlignedArray
     throw std::runtime_error("checkpoint " + name + " was written for focus " + std::to_string(h.focus) +
                              " cm, zsic " + std::to_string(h.zsic) + " cm; this build has focus " +
                              std::to_string(c::focus) + " cm, zsic " + std::to_string(c::zsic) + " cm");
+  if (h.dc_profile != c::dc_profile)
+    throw std::runtime_error("checkpoint " + name + " was written for DC field profile " +
+                             std::to_string(h.dc_profile) + "; this build has profile " +
+                             std::to_string(c::dc_profile) + " (UPPE_DC_PROFILE: 0 = CONST, 1 = SIGMOID_WINDOW)");
 
   const std::size_t bytesO = E_O.size() * sizeof(cplx);
   const std::size_t bytesT = E_T.size() * sizeof(cplx);

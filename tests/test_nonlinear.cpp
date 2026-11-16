@@ -11,6 +11,7 @@ namespace {
 struct Case {
   double etAmp;
   bool expectClamp;
+  double dcKV;  // external field, kV/cm
 };
 
 // kbuf is built from spectra of real signals times omega^2*j, omega and j, so the negative
@@ -72,12 +73,13 @@ void run_case(const Case& cs, test::Rng& rng) {
   in.et = et.data();
   in.nr = nr;
   in.dz = dz;
+  in.dc = cs.dcKV * ph.DC_norm;
   in.k_opt = kOpt.data();
   in.k_thz = kThz.data();
   in.ne_max = neMax.data();
   const long long clamped = nonlinear_response(in, ws);
 
-  const ref::JefResult R = ref::jef_thread(tf, ph, thzFull, etFull, nr, dz);
+  const ref::JefResult R = ref::jef_thread(tf, ph, thzFull, etFull, nr, dz, in.dc);
 
   CHECK(R.ionizing_samples > 0);
   CHECK(clamped == R.clamped);
@@ -115,7 +117,12 @@ void run_case(const Case& cs, test::Rng& rng) {
 int main() {
   test::init();
   test::Rng rng;
-  run_case({3.0, false}, rng);
-  run_case({400.0, true}, rng);
+  run_case({3.0, false, 10.0}, rng);
+  run_case({400.0, true, 10.0}, rng);
+  run_case({3.0, false, 0.0}, rng);
+  run_case({3.0, false, -10.0}, rng);
+  // A field comparable to the optical one (DC_norm is ~8.4e-5 per kV/cm), so the DC terms are not lost
+  // in the 1e-9 tolerance.
+  run_case({3.0, false, -30000.0}, rng);
   return test::finish("test_nonlinear");
 }

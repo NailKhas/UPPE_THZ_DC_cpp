@@ -50,7 +50,7 @@ long long nonlinear_response(const NonlinearInputs& in, NonlinearWorkspace& ws) 
   const int optStart = N / 2 - ntO / 2;
   const double dt = tf.dt;
   const double nu = c::omega_collide;
-  const double DC = ph.DC_Field;
+  const double DC = in.dc;
   const double I0 = ph.I0;
   const double RefOhm = ph.ROhm;
   if (ph.P_N2.size() != static_cast<std::size_t>(c::ion_table_size) || ph.P_O2.size() != ph.P_N2.size())

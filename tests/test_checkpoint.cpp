@@ -121,13 +121,19 @@ int main(int argc, char** argv) {
     const std::string full = read_file(ckA);
     std::string flipped = full;
     flipped[full.size() / 2] ^= 1;
+    // Header: magic[8], version, nt_all, nR_first, nR_opt, nR_THz (int32 each), then the int32 DC profile id.
+    std::string otherProfile = full;
+    otherProfile[28] ^= 1;
     std::ofstream(root / "short.ckpt", std::ios::binary)
         .write(full.data(), static_cast<std::streamsize>(full.size() / 2));
     std::ofstream(root / "flipped.ckpt", std::ios::binary)
         .write(flipped.data(), static_cast<std::streamsize>(flipped.size()));
+    std::ofstream(root / "profile.ckpt", std::ios::binary)
+        .write(otherProfile.data(), static_cast<std::streamsize>(otherProfile.size()));
   }
   CHECK(throws_on_read(root / "short.ckpt", sizes));
   CHECK(throws_on_read(root / "flipped.ckpt", sizes));
+  CHECK(throws_on_read(root / "profile.ckpt", sizes));
   Sizes other = sizes;
   other.nR_THz = 64;
   CHECK(throws_on_read(ckA, other));

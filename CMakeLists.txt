@@ -31,6 +31,17 @@ uppe_double_literal(UPPE_FOCUS_CM _uppe_focus_literal)
 uppe_double_literal(UPPE_ZSIC_CM _uppe_zsic_literal)
 message(STATUS "Focal distance: ${UPPE_FOCUS_CM} cm, start distance zsic: ${UPPE_ZSIC_CM} cm")
 
+set(UPPE_DC_PROFILE "SIGMOID_WINDOW" CACHE STRING "External DC field along z: CONST (10 kV/cm) or SIGMOID_WINDOW")
+set_property(CACHE UPPE_DC_PROFILE PROPERTY STRINGS CONST SIGMOID_WINDOW)
+if(UPPE_DC_PROFILE STREQUAL "CONST")
+  set(_uppe_dc_profile_id 0)
+elseif(UPPE_DC_PROFILE STREQUAL "SIGMOID_WINDOW")
+  set(_uppe_dc_profile_id 1)
+else()
+  message(FATAL_ERROR "Unknown UPPE_DC_PROFILE '${UPPE_DC_PROFILE}' (use CONST or SIGMOID_WINDOW)")
+endif()
+message(STATUS "External DC field profile: ${UPPE_DC_PROFILE}")
+
 find_package(OpenMP REQUIRED COMPONENTS CXX)
 
 add_library(uppe_core STATIC
@@ -48,7 +59,8 @@ add_library(uppe_core STATIC
 )
 target_include_directories(uppe_core PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(uppe_core PUBLIC OpenMP::OpenMP_CXX)
-target_compile_definitions(uppe_core PUBLIC UPPE_FOCUS_CM=${_uppe_focus_literal} UPPE_ZSIC_CM=${_uppe_zsic_literal})
+target_compile_definitions(uppe_core PUBLIC UPPE_FOCUS_CM=${_uppe_focus_literal} UPPE_ZSIC_CM=${_uppe_zsic_literal}
+                                             UPPE_DC_PROFILE=${_uppe_dc_profile_id})
 
 # The port follows the Fortran operation order and IEEE semantics, so value-changing
 # floating-point optimizations (-ffast-math, /fp:fast, icx default -fp-model=fast) must stay off.
