@@ -12,12 +12,12 @@ struct Point {
   double z_cm, kV;
 };
 
-// f(z) = 20*(1/(1+exp(-5(z-20.5))) - 1/2)*exp(-((z-20.5)/3)^10), evaluated in Python (double precision).
+// f(z) = 20*(1/(1+exp(-5(z-20.4605))) - 1/2)*exp(-((z-20.4605)/3)^10), evaluated in Python (double precision).
 constexpr Point kWindow[] = {
-    {16.0, -9.044649387858707e-25}, {17.0, -0.09357059294733021}, {18.0, -8.508554394746366},
-    {19.0, -9.979194360269044},     {20.5, 0.0},                  {20.6, 2.449186624037119},
-    {22.0, 9.979194360269044},      {23.5, 3.678792161011617},    {24.5, 1.9405163666159681e-07},
-    {25.0, 9.044649387858707e-25},
+    {16.0, -1.1744482179130418e-22}, {17.0, -0.1544633512639002}, {18.0, -8.713280528933177},
+    {19.0, -9.979066595063147},      {20.4605, 0.0},              {20.6, 3.3526651423421896},
+    {22.0, 9.978280014953139},       {23.5, 3.1989938914186826},  {24.5, 3.1017029084957476e-08},
+    {25.0, 4.668997497783324e-27},
 };
 
 // f(z) = 10*exp(-((z-20.5)/3)^8), evaluated in Python (double precision).
@@ -41,11 +41,11 @@ int main() {
   } else if constexpr (c::dc_profile == 2) {
     for (const Point& p : kSuperGauss)
       CHECK_CLOSE(dc_field_kV(p.z_cm), p.kV, 1e-13 * std::max(1.0, std::fabs(p.kV)));
-    CHECK(dc_field_kV(c::dc_z0) == 10.0);
+    CHECK(dc_field_kV(c::dc_sg_z0) == 10.0);
     // Even about z0, positive everywhere, at most 10 kV/cm.
     for (double d = 0.01; d < 5.0; d += 0.037) {
-      CHECK_CLOSE(dc_field_kV(c::dc_z0 + d), dc_field_kV(c::dc_z0 - d), 1e-13);
-      CHECK(dc_field_kV(c::dc_z0 + d) >= 0.0 && dc_field_kV(c::dc_z0 + d) <= 10.0);
+      CHECK_CLOSE(dc_field_kV(c::dc_sg_z0 + d), dc_field_kV(c::dc_sg_z0 - d), 1e-13);
+      CHECK(dc_field_kV(c::dc_sg_z0 + d) >= 0.0 && dc_field_kV(c::dc_sg_z0 + d) <= 10.0);
     }
     CHECK(dc_field_kV(0.0) == 0.0);
     CHECK(dc_field_kV(40.0) == 0.0);
@@ -56,8 +56,8 @@ int main() {
     // Odd about z0: the field changes sign there.
     for (double d = 0.01; d < 5.0; d += 0.037) CHECK_CLOSE(dc_field_kV(c::dc_z0 + d), -dc_field_kV(c::dc_z0 - d), 1e-13);
     // Plateaus of about -+10 kV/cm inside the window, nothing far outside it.
-    for (double z = 18.9; z < 19.45; z += 0.1) CHECK(dc_field_kV(z) < -9.9 && dc_field_kV(z) > -10.0);
-    for (double z = 21.6; z < 22.15; z += 0.1) CHECK(dc_field_kV(z) > 9.9 && dc_field_kV(z) < 10.0);
+    for (double d = -1.6; d < -1.05; d += 0.1) CHECK(dc_field_kV(c::dc_z0 + d) < -9.9 && dc_field_kV(c::dc_z0 + d) > -10.0);
+    for (double d = 1.1; d < 1.65; d += 0.1) CHECK(dc_field_kV(c::dc_z0 + d) > 9.9 && dc_field_kV(c::dc_z0 + d) < 10.0);
     CHECK(std::fabs(dc_field_kV(0.0)) == 0.0);
     CHECK(std::fabs(dc_field_kV(40.0)) == 0.0);
     for (const Point& p : kWindow) CHECK(dc_field(ph, p.z_cm) == dc_field_kV(p.z_cm) * ph.DC_norm);
