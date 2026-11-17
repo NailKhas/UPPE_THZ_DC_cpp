@@ -60,20 +60,24 @@ inline constexpr double WW0 = 0.5e-3;
 
 // External DC field profile along z; -DUPPE_DC_PROFILE=<id>.
 //   0: constant 10 kV/cm (the Fortran value);
-//   1: dc_amp*(1/(1+exp(-dc_rate*(z-dc_z0))) - 1/2)*exp(-((z-dc_z0)/dc_width)^dc_order) kV/cm, z in cm.
+//   1: dc_amp*(1/(1+exp(-dc_rate*(z-dc_z0))) - 1/2)*exp(-((z-dc_z0)/dc_width)^dc_order) kV/cm, z in cm;
+//   2: dc_sg_amp*exp(-((z-dc_z0)/dc_width)^dc_sg_order) kV/cm, z in cm.
 #ifndef UPPE_DC_PROFILE
 #define UPPE_DC_PROFILE 1
 #endif
 inline constexpr int dc_profile = UPPE_DC_PROFILE;
-static_assert(dc_profile == 0 || dc_profile == 1, "UPPE_DC_PROFILE must be 0 (constant) or 1 (sigmoid window)");
+static_assert(dc_profile >= 0 && dc_profile <= 2,
+              "UPPE_DC_PROFILE must be 0 (constant), 1 (sigmoid window) or 2 (super-Gaussian)");
 inline constexpr double dc_amp = 20.0;
 inline constexpr double dc_rate = 5.0;
 inline constexpr double dc_z0 = 20.5;
 inline constexpr double dc_width = 3.0;
 inline constexpr double dc_order = 10.0;
+inline constexpr double dc_sg_amp = 10.0;
+inline constexpr double dc_sg_order = 8.0;
 
 // Snapshots are written every 0.1 cm for 19 cm <= z < snap_dense_end, every 0.25 cm elsewhere.
-// The Fortran end, 20.2 cm, is kept for the constant field; the sigmoid window changes sign at 20.5 cm.
+// The Fortran end, 20.2 cm, is kept for the constant field; the profiles along z are centred at 20.5 cm.
 inline constexpr double snap_dense_end = dc_profile == 0 ? static_cast<double>(20.2f) : 21.5;
 
 // InitConsts reads indices 0..9998 of P_N2/P_O2 from N2.dat/O2.dat.

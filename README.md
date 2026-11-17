@@ -70,7 +70,7 @@ ctest --preset fftw-openblas
 | `UPPE_BUILD_TESTS` | `ON` | собрать тесты |
 | `UPPE_FOCUS_CM` | `20.0` | фокусное расстояние `focus`, см (константа компиляции; от него зависят `a0` и `Ldifr`) |
 | `UPPE_ZSIC_CM` | `18.0` | `zsic`, см: начало расчёта, первый шаг `dz = zsic/Ldifr`; меньше `focus`, `a0 = a00·(1 − zsic/focus)` |
-| `UPPE_DC_PROFILE` | `SIGMOID_WINDOW` | внешнее поле: `SIGMOID_WINDOW` — `DC(z)` из раздела «Внешнее поле DC(z)», `CONST` — 10 кВ/см, как в Фортране |
+| `UPPE_DC_PROFILE` | `SIGMOID_WINDOW` | внешнее поле: `SIGMOID_WINDOW` и `SUPERGAUSS` — `DC(z)` из раздела «Внешнее поле DC(z)», `CONST` — 10 кВ/см, как в Фортране |
 
 `-ffast-math`, `/fp:fast` и режим icx по умолчанию (`-fp-model=fast`) отключены намеренно:
 порт воспроизводит фортрановский порядок операций, а fast-math его меняет.
@@ -121,6 +121,15 @@ DC(z) = 20·(1/(1 + exp(−5(z − 20.5))) − 1/2)·exp(−((z − 20.5)/3)^10)
 `c::dc_amp`, `dc_rate`, `dc_z0`, `dc_width`, `dc_order` в `src/constants.hpp`; формула пишется
 в `parameters.dat`, значение на каждом шаге — в лог строкой `DC = ... kV/cm`.
 
+С `UPPE_DC_PROFILE=SUPERGAUSS` поле знака не меняет:
+
+```
+DC(z) = 10·exp(−((z − 20.5)/3)^8)  кВ/см
+```
+
+Максимум 10 кВ/см на 20.5 см, 9.96 кВ/см на 19 и 22 см, 7.92 кВ/см на 18 и 23 см (на старте при
+`zsic = 18` см), 0.32 кВ/см на 17 и 24 см. Параметры — `c::dc_sg_amp`, `dc_z0`, `dc_width`, `dc_sg_order`.
+
 Поле входит только в нелинейный отклик (`src/nonlinear.cpp`): `P = E³ + 3E²·DC + 3E·DC²` и ток Друде
 `Ne·(E + DC)`. В `E(w,kr)` оно не входит и не распространяется, поэтому `DC(z)` — это амплитуда
 источника в правой части UPPE, явно зависящая от `z`. Внутри одного шага вся временная сетка
@@ -167,14 +176,15 @@ Workflow [`.github/workflows/simulate.yml`](.github/workflows/simulate.yml) со
    который скачивает чекпоинт и продолжает с того же шага. Вся цепочка собирается из одного
    коммита (`code_sha` фиксируется в первом сегменте). Сегменты одного `tag` не идут одновременно.
 
-Запуск: Actions → **Simulate** → **Run workflow**, указать `z_max` (см), `focus` и `zsic` (см)
-и новое имя цепочки `tag`, остальные поля оставить по умолчанию. `z_max = none` — без ограничения
+Запуск: Actions → **Simulate** → **Run workflow**, указать `z_max` (см), `focus` и `zsic` (см),
+профиль поля `dc_profile` и новое имя цепочки `tag`, остальные поля оставить по умолчанию. `z_max = none` — без ограничения
 по `z`: цепочка идёт, пока её не отменят или пока не будет пройдено `max_segments` сегментов.
-`focus` и `zsic` вкомпилируются (`-DUPPE_FOCUS_CM`, `-DUPPE_ZSIC_CM`) и передаются всем сегментам
-цепочки. Из командной строки:
+`focus`, `zsic` и `dc_profile` вкомпилируются (`-DUPPE_FOCUS_CM`, `-DUPPE_ZSIC_CM`, `-DUPPE_DC_PROFILE`)
+и передаются всем сегментам цепочки. Из командной строки:
 
 ```sh
 gh workflow run simulate.yml --ref f_20cm -f z_max=24.5 -f focus=20 -f zsic=18 -f tag=f20-dcwin
+gh workflow run simulate.yml --ref f_20cm -f z_max=24.5 -f focus=20 -f zsic=18 -f dc_profile=SUPERGAUSS -f tag=f20-gauss8
 ```
 
 Пока сегмент считает, `ci/stream_results.sh` раз в 10 минут выкладывает новые результаты в release
@@ -236,7 +246,7 @@ powershell -ExecutionPolicy Bypass -File tools\fetch_results.ps1 -Tag z30-old
 | `hankel` | DGEMM-преобразование против `dot_product`, усечения по строкам/частотам, `E + 0.5k`, самообратимость |
 | `propagation` | таблицы `kz`, `k_plasma`, фильтры, `LinThread`, `KdivKZ` |
 | `nonlinear` | `JefThread_THz` целиком (с ионизацией и с выходом за таблицу) при поле 10, 0, −10 и −30000 кВ/см |
-| `dc_profile` | `DC(z)` против значений из Python, нечётность относительно 20.5 см, плато ±10 кВ/см; `CONST` = 10 кВ/см |
+| `dc_profile` | `DC(z)` против значений из Python: для окна нечётность относительно 20.5 см и плато ±10 кВ/см, для `SUPERGAUSS` чётность и пик 10 кВ/см; `CONST` = 10 кВ/см |
 | `first_step` | `FirstStep`, `SpSIC.dat`, `Incident.dat` |
 | `simulation_smoke` | два шага всей программы на уменьшенной сетке, все выходные файлы |
 | `checkpoint` | 14 шагов подряд против 6 шагов + чекпоинт + продолжение: все файлы и итоговые чекпоинты совпадают побайтно; повреждённый чекпоинт и чекпоинт с другим профилем поля отвергаются |

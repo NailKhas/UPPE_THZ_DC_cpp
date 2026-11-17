@@ -135,7 +135,7 @@ LoopState read_checkpoint(const fs::path& file, const Sizes& sizes, AlignedArray
   if (h.dc_profile != c::dc_profile)
     throw std::runtime_error("checkpoint " + name + " was written for DC field profile " +
                              std::to_string(h.dc_profile) + "; this build has profile " +
-                             std::to_string(c::dc_profile) + " (UPPE_DC_PROFILE: 0 = CONST, 1 = SIGMOID_WINDOW)");
+                             std::to_string(c::dc_profile) + " (UPPE_DC_PROFILE: 0 = CONST, 1 = SIGMOID_WINDOW, 2 = SUPERGAUSS)");
 
   const std::size_t bytesO = E_O.size() * sizeof(cplx);
   const std::size_t bytesT = E_T.size() * sizeof(cplx);

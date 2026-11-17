@@ -20,6 +20,13 @@ constexpr Point kWindow[] = {
     {25.0, 9.044649387858707e-25},
 };
 
+// f(z) = 10*exp(-((z-20.5)/3)^8), evaluated in Python (double precision).
+constexpr Point kSuperGauss[] = {
+    {16.0, 7.404699497933558e-11}, {17.0, 0.3231532598302924}, {18.0, 7.9249582660242766},
+    {19.0, 9.961013694701176},     {20.5, 10.0},               {22.0, 9.961013694701176},
+    {23.0, 7.9249582660242766},    {24.0, 0.3231532598302924}, {25.0, 7.404699497933558e-11},
+};
+
 }  // namespace
 
 int main() {
@@ -31,6 +38,18 @@ int main() {
       CHECK(dc_field_kV(z) == static_cast<double>(4.f / 0.4f));
       CHECK(dc_field(ph, z) == static_cast<double>(4.f / 0.4f) * ph.DC_norm);
     }
+  } else if constexpr (c::dc_profile == 2) {
+    for (const Point& p : kSuperGauss)
+      CHECK_CLOSE(dc_field_kV(p.z_cm), p.kV, 1e-13 * std::max(1.0, std::fabs(p.kV)));
+    CHECK(dc_field_kV(c::dc_z0) == 10.0);
+    // Even about z0, positive everywhere, at most 10 kV/cm.
+    for (double d = 0.01; d < 5.0; d += 0.037) {
+      CHECK_CLOSE(dc_field_kV(c::dc_z0 + d), dc_field_kV(c::dc_z0 - d), 1e-13);
+      CHECK(dc_field_kV(c::dc_z0 + d) >= 0.0 && dc_field_kV(c::dc_z0 + d) <= 10.0);
+    }
+    CHECK(dc_field_kV(0.0) == 0.0);
+    CHECK(dc_field_kV(40.0) == 0.0);
+    for (const Point& p : kSuperGauss) CHECK(dc_field(ph, p.z_cm) == dc_field_kV(p.z_cm) * ph.DC_norm);
   } else {
     for (const Point& p : kWindow) CHECK_CLOSE(dc_field_kV(p.z_cm), p.kV, 1e-13 * std::max(1.0, std::fabs(p.kV)));
     CHECK(dc_field_kV(c::dc_z0) == 0.0);
