@@ -70,7 +70,7 @@ static_assert(dc_profile >= 0 && dc_profile <= 2,
               "UPPE_DC_PROFILE must be 0 (constant), 1 (sigmoid window) or 2 (super-Gaussian)");
 inline constexpr double dc_amp = 20.0;
 inline constexpr double dc_rate = 5.0;
-inline constexpr double dc_z0 = 20.4605;
+inline constexpr double dc_z0 = 20.373;
 inline constexpr double dc_width = 3.0;
 inline constexpr double dc_order = 10.0;
 inline constexpr double dc_sg_z0 = 20.5;

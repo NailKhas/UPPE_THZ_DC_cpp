@@ -219,6 +219,7 @@ jobs:
             run/res/Imax.dat
             run/res/Nemax.dat
             run/res/Energy.dat
+            run/res/Den.dat
           if-no-files-found: error
           retention-days: 7
           compression-level: 1

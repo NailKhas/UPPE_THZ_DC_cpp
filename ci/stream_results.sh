@@ -2,7 +2,7 @@
 # Streams the results of a running simulation to the GitHub release $RELEASE (gh must be authenticated):
 #   grids.tar.gz               SpSIC.dat, Incident.dat and the grid files of res/ (segment 01 only)
 #   segNN_Zaaaa-Zbbbb.tar.gz   res/{IS,Fl,Or,Ne,IO} of the snapshots completed since the last pass
-#   latest_segNN.tar.gz        res/Imax.dat, Nemax.dat, Energy.dat, snapshots of this segment, log_segNN.txt
+#   latest_segNN.tar.gz        res/Imax.dat, Nemax.dat, Energy.dat, Den.dat, snapshots of this segment, log_segNN.txt
 # kw_THz is not streamed. A snapshot is complete once its number is listed in res/snapshots.txt.
 # Runs a pass every <interval> seconds; when <out>/.stream_stop appears it makes a final pass and exits.
 # Usage: stream_results.sh <out dir> <segment, two digits> [interval s]
@@ -70,7 +70,7 @@ stream_latest() {
   local stage="$work/latest" f
   rm -rf "$stage"
   mkdir -p "$stage/res"
-  for f in Imax.dat Nemax.dat Energy.dat; do
+  for f in Imax.dat Nemax.dat Energy.dat Den.dat; do
     [ -f "$out/res/$f" ] && cp "$out/res/$f" "$stage/res/"
   done
   [ -f "$out/res/snapshots.txt" ] && cp "$out/res/snapshots.txt" "$stage/res/snapshots_seg$seg.txt"

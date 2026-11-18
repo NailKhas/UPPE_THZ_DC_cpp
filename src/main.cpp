@@ -30,7 +30,7 @@ void usage() {
       "  --data-dir <dir>      directory with N2.dat and O2.dat (default: current directory)\n"
       "  --out-dir <dir>       directory for res/, SpSIC.dat and Incident.dat (default: current directory)\n"
       "  --checkpoint <file>   on an early stop (time limit, SIGINT/SIGTERM, --max-steps) save the state here\n"
-      "  --resume <file>       continue from a checkpoint; res/Imax.dat, Nemax.dat, Energy.dat are appended to\n"
+      "  --resume <file>       continue from a checkpoint; res/Imax.dat, Nemax.dat, Energy.dat, Den.dat are appended to\n"
       "  --wall-limit-min <m>  stop before the run exceeds m minutes of wall time\n"
       "  --min-free-gb <g>     stop once less than g GB (1e9 bytes) are free on the disk of --out-dir\n"
       "  --max-steps <n>       stop after n z steps in total\n"

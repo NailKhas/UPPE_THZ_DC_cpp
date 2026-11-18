@@ -155,7 +155,7 @@ RunStatus run_simulation(const RunConfig& cfg) {
   TextWriter fImax(out / "res" / "Imax.dat", resume);
   TextWriter fNemax(out / "res" / "Nemax.dat", resume);
   TextWriter fEnergy(out / "res" / "Energy.dat", resume);
-  TextWriter fDen(out / "res" / "Den.dat", resume);  // opened and never written, as in the Fortran
+  TextWriter fDen(out / "res" / "Den.dat", resume);
   TextWriter fSnaps(out / "res" / "snapshots.txt", resume);  // z_pos of every completed snapshot
 
   AlignedArray<cplx> E_O(nO);   // E(w,kr)
@@ -345,6 +345,12 @@ RunStatus run_simulation(const RunConfig& cfg) {
     std::printf(" %14.7g Ne_max = %.15g\n", static_cast<double>(static_cast<float>(z * c::Ldifr)), Nemax);
     fNemax.d(z * c::Ldifr).d(Nemax).nl();
     fNemax.flush();
+    // Den = sum (Ne/N0)*(r/a0)*d(r/a0) over the optical nodes, without 2*pi.
+    double Den = 0.0;
+    for (int i = 0; i < nrO; ++i) Den += neMax[i] * gO.r1[i] * gO.dr1[i];
+    std::printf(" %14.7g Den = %.15g\n", static_cast<double>(static_cast<float>(z * c::Ldifr)), Den);
+    fDen.d(z * c::Ldifr).d(Den).nl();
+    fDen.flush();
     std::printf(" %14.7g DC = %.15g kV/cm\n", static_cast<double>(static_cast<float>(z * c::Ldifr)),
                 dc_field_kV(z * c::Ldifr));
     std::printf(" ----------------------------------------------------------- \n");

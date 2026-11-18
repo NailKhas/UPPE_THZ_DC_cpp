@@ -101,7 +101,7 @@ uppe_thz_dc [--z-max <см>] [--threads <n>] [--data-dir <папка>] [--out-di
   продолжить с другими `UPPE_FOCUS_CM`/`UPPE_ZSIC_CM`/`UPPE_DC_PROFILE` нельзя. Файл пишется через временный и переименовывается.
   Первый сигнал просит остановиться после текущего шага, второй убивает процесс.
 - `--resume` — продолжить с чекпоинта: `FirstStep` и запись файлов сеток пропускаются,
-  `res/Imax.dat`, `res/Nemax.dat`, `res/Energy.dat` дописываются, снимки продолжают расписание.
+  `res/Imax.dat`, `res/Nemax.dat`, `res/Energy.dat`, `res/Den.dat` дописываются, снимки продолжают расписание.
   Результат побитно совпадает с непрерывным расчётом (проверяется тестом `checkpoint`).
 
 Код выхода: 0 — достигнут `--z-max`, 75 — досрочная остановка (чекпоинт записан, если задан), 1 — ошибка.
@@ -113,12 +113,13 @@ uppe_thz_dc [--z-max <см>] [--threads <n>] [--data-dir <папка>] [--out-di
 расстояния `z` от линзы, см:
 
 ```
-DC(z) = 20·(1/(1 + exp(−5(z − 20.4605))) − 1/2)·exp(−((z − 20.4605)/3)^10)  кВ/см
+DC(z) = 20·(1/(1 + exp(−5(z − 20.373))) − 1/2)·exp(−((z − 20.373)/3)^10)  кВ/см
 ```
 
-Около −10 кВ/см на 18.86–19.36 см, смена знака на 20.4605 см, около +10 кВ/см на 21.56–22.06 см,
-нуль вне 17–24 см. На старте (`zsic = 18` см) поле −8.71 кВ/см. Смена знака стоит там, где
-`∫ Ne_max(z)·DC(z) dz = 0` по `Ne_max(z)` прогона `f20-dcwin` (смена знака на 20.5 см). Параметры профиля —
+Около −10 кВ/см на 18.77–19.27 см, смена знака на 20.373 см, около +10 кВ/см на 21.47–21.97 см,
+нуль вне 17–24 см. На старте (`zsic = 18` см) поле −9.09 кВ/см. Смена знака стоит там, где
+`∫ Den(z)·DC(z) dz = 0` по `Den(z)` из снимков `res/Ne` прогона `f20-z04605` (смена знака на 20.4605 см).
+Параметры профиля —
 `c::dc_amp`, `dc_rate`, `dc_z0`, `dc_width`, `dc_order` в `src/constants.hpp`; формула пишется
 в `parameters.dat`, значение на каждом шаге — в лог строкой `DC = ... kV/cm`.
 
@@ -184,7 +185,7 @@ Workflow [`.github/workflows/simulate.yml`](.github/workflows/simulate.yml) со
 и передаются всем сегментам цепочки. Из командной строки:
 
 ```sh
-gh workflow run simulate.yml --ref f_20cm -f z_max=24.5 -f focus=20 -f zsic=18 -f tag=f20-z04605
+gh workflow run simulate.yml --ref f_20cm -f z_max=21 -f focus=20 -f zsic=18 -f tag=f20-z0373
 gh workflow run simulate.yml --ref f_20cm -f z_max=24.5 -f focus=20 -f zsic=18 -f dc_profile=SUPERGAUSS -f tag=f20-gauss8
 ```
 
@@ -193,7 +194,7 @@ gh workflow run simulate.yml --ref f_20cm -f z_max=24.5 -f focus=20 -f zsic=18 -
 
 - `grids.tar.gz` — `SpSIC.dat`, `Incident.dat`, `parameters.dat` и файлы сеток (один раз);
 - `segNN_Zaaaa-Zbbbb.tar.gz` — `res/{IS,Fl,Or,Ne,IO}` законченных снимков;
-- `latest_segNN.tar.gz` — `res/Imax.dat`, `Nemax.dat`, `Energy.dat` (с начала расчёта), `log_segNN.txt`;
+- `latest_segNN.tar.gz` — `res/Imax.dat`, `Nemax.dat`, `Energy.dat`, `Den.dat` (с начала расчёта), `log_segNN.txt`;
 - `DONE.txt` — появляется, когда достигнут `z_max`.
 
 `res/kw_THz` в release не попадает: снимки каждого сегмента лежат в artifact `kw-<tag>-segNN`
@@ -247,7 +248,7 @@ powershell -ExecutionPolicy Bypass -File tools\fetch_results.ps1 -Tag z30-old
 | `hankel` | DGEMM-преобразование против `dot_product`, усечения по строкам/частотам, `E + 0.5k`, самообратимость |
 | `propagation` | таблицы `kz`, `k_plasma`, фильтры, `LinThread`, `KdivKZ` |
 | `nonlinear` | `JefThread_THz` целиком (с ионизацией и с выходом за таблицу) при поле 10, 0, −10 и −30000 кВ/см |
-| `dc_profile` | `DC(z)` против значений из Python: для окна нечётность относительно 20.4605 см и плато ±10 кВ/см, для `SUPERGAUSS` чётность и пик 10 кВ/см; `CONST` = 10 кВ/см |
+| `dc_profile` | `DC(z)` против значений из Python: для окна нечётность относительно 20.373 см и плато ±10 кВ/см, для `SUPERGAUSS` чётность и пик 10 кВ/см; `CONST` = 10 кВ/см |
 | `first_step` | `FirstStep`, `SpSIC.dat`, `Incident.dat` |
 | `simulation_smoke` | два шага всей программы на уменьшенной сетке, все выходные файлы |
 | `checkpoint` | 14 шагов подряд против 6 шагов + чекпоинт + продолжение: все файлы и итоговые чекпоинты совпадают побайтно; повреждённый чекпоинт и чекпоинт с другим профилем поля отвергаются |

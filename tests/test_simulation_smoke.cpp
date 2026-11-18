@@ -94,6 +94,13 @@ int main(int argc, char** argv) {
   CHECK(all_finite(nemax));
   for (const auto& r : nemax) CHECK(r.size() == 2 && r[1] >= 0.0 && r[1] <= 1.0);
 
+  const auto den = read_table(res / "Den.dat");
+  CHECK(den.size() == nemax.size());
+  CHECK(all_finite(den));
+  for (const auto& r : den) CHECK(r.size() == 2 && r[1] >= 0.0);
+  for (std::size_t k = 0; k < den.size() && k < nemax.size(); ++k)
+    if (den[k].size() == 2 && nemax[k].size() == 2) CHECK(den[k][0] == nemax[k][0]);
+
   for (const char* d : {"IS", "Fl", "kw_THz", "Or", "Ne", "IO"}) CHECK(count_files(res / d) >= 1);
   // kw_THz may contain nan (asin of an argument > 1, as in the Fortran); the others must be finite.
   for (const char* d : {"IS", "Fl", "Or", "Ne", "IO"}) {
