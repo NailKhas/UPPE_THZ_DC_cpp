@@ -27,6 +27,21 @@ constexpr Point kSuperGauss[] = {
     {23.0, 7.9249582660242766},    {24.0, 0.3231532598302924}, {25.0, 7.404699497933558e-11},
 };
 
+// f(z) = 15*sin(z*2*pi*50/3), evaluated in Python (double precision).
+constexpr Point kSine[] = {
+    {0.0, 0.0},
+    {0.015, 15.0},
+    {0.03, 1.83697019872103e-15},
+    {0.045, -15.0},
+    {0.06, -3.67394039744206e-15},
+    {18.0, -1.5285077606886779e-12},
+    {18.015, 15.0},
+    {20.0, 12.990381056767051},
+    {20.5, -12.99038105676533},
+    {21.0, 2.7642144547278503e-12},
+    {22.0, -12.990381056762994},
+};
+
 }  // namespace
 
 int main() {
@@ -50,6 +65,18 @@ int main() {
     CHECK(dc_field_kV(0.0) == 0.0);
     CHECK(dc_field_kV(40.0) == 0.0);
     for (const Point& p : kSuperGauss) CHECK(dc_field(ph, p.z_cm) == dc_field_kV(p.z_cm) * ph.DC_norm);
+  } else if constexpr (c::dc_profile == 3) {
+    for (const Point& p : kSine) CHECK_CLOSE(dc_field_kV(p.z_cm), p.kV, 1e-11);
+    CHECK(dc_field_kV(0.0) == 0.0);
+    // Periodic with period 3/50 = 0.06 cm, amplitude 15 kV/cm, opposite sign after half-period.
+    const double period = c::dc_sin_span / c::dc_sin_cycles;
+    for (double z = 18.0; z < 22.0; z += 0.013) {
+      const double v = dc_field_kV(z);
+      CHECK(std::fabs(v) <= c::dc_sin_amp + 1e-13);
+      CHECK_CLOSE(dc_field_kV(z + period), v, 1e-10);
+      CHECK_CLOSE(dc_field_kV(z + 0.5 * period), -v, 1e-10);
+    }
+    for (const Point& p : kSine) CHECK(dc_field(ph, p.z_cm) == dc_field_kV(p.z_cm) * ph.DC_norm);
   } else {
     for (const Point& p : kWindow) CHECK_CLOSE(dc_field_kV(p.z_cm), p.kV, 1e-13 * std::max(1.0, std::fabs(p.kV)));
     CHECK(dc_field_kV(c::dc_z0) == 0.0);

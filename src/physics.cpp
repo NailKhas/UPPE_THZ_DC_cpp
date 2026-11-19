@@ -32,9 +32,11 @@ double dc_field_kV(double z_cm) {
     const double d = z_cm - c::dc_z0;
     return c::dc_amp * (1.0 / (1.0 + std::exp(-c::dc_rate * d)) - 0.5) *
            std::exp(-std::pow(std::abs(d / c::dc_width), c::dc_order));
-  } else {
+  } else if constexpr (c::dc_profile == 2) {
     const double d = z_cm - c::dc_sg_z0;
     return c::dc_sg_amp * std::exp(-std::pow(std::abs(d / c::dc_width), c::dc_sg_order));
+  } else {
+    return c::dc_sin_amp * std::sin(z_cm * 2.0 * c::dc_sin_pi * c::dc_sin_cycles / c::dc_sin_span);
   }
 }
 
@@ -90,9 +92,12 @@ void write_params(const Physics& ph, double ng, double d2kdw2, int nthreads, con
     if constexpr (c::dc_profile == 1)
       std::snprintf(profile, sizeof profile, "DC field = %g*(1/(1+exp(-%g*(z-%g)))-1/2)*exp(-((z-%g)/%g)^%g) kV/cm",
                     c::dc_amp, c::dc_rate, c::dc_z0, c::dc_z0, c::dc_width, c::dc_order);
-    else
+    else if constexpr (c::dc_profile == 2)
       std::snprintf(profile, sizeof profile, "DC field = %g*exp(-((z-%g)/%g)^%g) kV/cm", c::dc_sg_amp, c::dc_sg_z0,
                     c::dc_width, c::dc_sg_order);
+    else
+      std::snprintf(profile, sizeof profile, "DC field = %g*sin(z*2*pi*%g/%g) kV/cm", c::dc_sin_amp,
+                    c::dc_sin_cycles, c::dc_sin_span);
     std::printf(" %s\n", profile);
     file_line(profile);
   }

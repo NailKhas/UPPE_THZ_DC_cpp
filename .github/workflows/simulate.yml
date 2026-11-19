@@ -27,6 +27,7 @@ on:
         options:
           - SIGMOID_WINDOW
           - SUPERGAUSS
+          - SINE
           - CONST
         default: SIGMOID_WINDOW
       tag:

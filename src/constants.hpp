@@ -61,13 +61,14 @@ inline constexpr double WW0 = 0.5e-3;
 // External DC field profile along z; -DUPPE_DC_PROFILE=<id>.
 //   0: constant 10 kV/cm (the Fortran value);
 //   1: dc_amp*(1/(1+exp(-dc_rate*(z-dc_z0))) - 1/2)*exp(-((z-dc_z0)/dc_width)^dc_order) kV/cm, z in cm;
-//   2: dc_sg_amp*exp(-((z-dc_sg_z0)/dc_width)^dc_sg_order) kV/cm, z in cm.
+//   2: dc_sg_amp*exp(-((z-dc_sg_z0)/dc_width)^dc_sg_order) kV/cm, z in cm;
+//   3: dc_sin_amp*sin(z*2*pi*dc_sin_cycles/dc_sin_span) kV/cm, z in cm.
 #ifndef UPPE_DC_PROFILE
 #define UPPE_DC_PROFILE 1
 #endif
 inline constexpr int dc_profile = UPPE_DC_PROFILE;
-static_assert(dc_profile >= 0 && dc_profile <= 2,
-              "UPPE_DC_PROFILE must be 0 (constant), 1 (sigmoid window) or 2 (super-Gaussian)");
+static_assert(dc_profile >= 0 && dc_profile <= 3,
+              "UPPE_DC_PROFILE must be 0 (constant), 1 (sigmoid window), 2 (super-Gaussian) or 3 (sine)");
 inline constexpr double dc_amp = 20.0;
 inline constexpr double dc_rate = 5.0;
 inline constexpr double dc_z0 = 20.373;
@@ -76,6 +77,11 @@ inline constexpr double dc_order = 10.0;
 inline constexpr double dc_sg_z0 = 20.5;
 inline constexpr double dc_sg_amp = 10.0;
 inline constexpr double dc_sg_order = 8.0;
+inline constexpr double dc_sin_amp = 15.0;
+inline constexpr double dc_sin_cycles = 50.0;
+inline constexpr double dc_sin_span = 3.0;
+// Full-precision pi for the spatial sine phase (c::pi is the truncated Fortran value).
+inline constexpr double dc_sin_pi = 3.14159265358979323846;
 
 // Snapshots are written every 0.1 cm for 19 cm <= z < snap_dense_end, every 0.25 cm elsewhere.
 // The Fortran end, 20.2 cm, is kept for the constant field; the profiles along z are centred near 20.5 cm.
