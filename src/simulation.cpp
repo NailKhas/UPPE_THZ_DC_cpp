@@ -49,14 +49,15 @@ struct Snapshot {
   }
 };
 
-std::unique_ptr<Snapshot> open_snapshot(const fs::path& out, int z_pos) {
+// The optical stage writes no kw_THz file (withKw = false).
+std::unique_ptr<Snapshot> open_snapshot(const fs::path& out, int z_pos, bool withKw) {
   char name[32];
   std::snprintf(name, sizeof name, "Z%04d.dat", z_pos);
   const fs::path res = out / "res";
   auto s = std::make_unique<Snapshot>();
   s->is = TextWriter(res / "IS" / name);
   s->fl = TextWriter(res / "Fl" / name);
-  s->kw_thz = TextWriter(res / "kw_THz" / name);
+  if (withKw) s->kw_thz = TextWriter(res / "kw_THz" / name);
   s->orr = TextWriter(res / "Or" / name);
   s->ne = TextWriter(res / "Ne" / name);
   s->io = TextWriter(res / "IO" / name);
@@ -158,6 +159,10 @@ RunStatus run_simulation(const RunConfig& cfg) {
   TextWriter fDen(out / "res" / "Den.dat", resume);
   TextWriter fSnaps(out / "res" / "snapshots.txt", resume);  // z_pos of every completed snapshot
 
+  const double k0a0a0 = c::k0 * c::a0 * c::a0;
+  // The optical stage runs while z < z_opt_end (do while (z.lt.71.0/(k0*a0*a0)) in PARALLEL.f90).
+  const double z_opt_end = c::opt_stage_end / k0a0a0;
+
   AlignedArray<cplx> E_O(nO);   // E(w,kr)
   AlignedArray<cplx> E_T(nT);   // E_THz(w,kr)
   double dz = c::zsic / c::Ldifr;
@@ -173,8 +178,11 @@ RunStatus run_simulation(const RunConfig& cfg) {
     z = st.z;
     z_flag = st.z_flag;
     Imax = st.Imax;
-    std::printf(" --- Resumed from %s at step %lld, z = %.15g cm ---\n", path_string(cfg.resume_path).c_str(), iz,
-                z * c::Ldifr);
+    if (st.stage != (z < z_opt_end ? 0 : 1))
+      throw std::runtime_error("checkpoint " + path_string(cfg.resume_path) + ": stage " + std::to_string(st.stage) +
+                               " does not match z = " + std::to_string(z * c::Ldifr) + " cm");
+    std::printf(" --- Resumed from %s at step %lld, z = %.15g cm (%s stage) ---\n",
+                path_string(cfg.resume_path).c_str(), iz, z * c::Ldifr, st.stage == 0 ? "optical" : "THz");
     std::fflush(stdout);
   } else {
     std::printf(" --- Incoming ---\n");
@@ -182,11 +190,10 @@ RunStatus run_simulation(const RunConfig& cfg) {
     {
       const RadialGrid g1 = make_radial(roots, sz.nR_first, sz.nR_opt, RadialKind::First);
       const HankelMatrix H1 = make_hankel(roots, sz.nR_first);
-      const double dz0 = 400. / c::Ldifr;
-      first_step(tf, bandO, g1, H1, disp.vg, dz, dz0, nrO, E_O.data(), out);
+      first_step(tf, bandO, g1, H1, disp.vg, dz, nrO, E_O.data(), out);
     }
     z = z + dz;
-    z_flag = z;
+    z_flag = c::snap_start / k0a0a0;
     Imax = sq(c::a00 / c::a0);
   }
 
@@ -226,6 +233,7 @@ RunStatus run_simulation(const RunConfig& cfg) {
   std::vector<double> neMax(nrO, 0.0), Fl(nrO, 0.0), sumsq(nrO, 0.0), maxsq(nrO, 0.0), intSp;
   FftPool fftO = make_fft_pool(ntO, nthreads);
   NonlinearWorkspace nlws(tf, nthreads);
+  NonlinearOptWorkspace nlwsO(tf, nthreads);
 
   NonlinearInputs nl;
   nl.tf = &tf;
@@ -237,15 +245,31 @@ RunStatus run_simulation(const RunConfig& cfg) {
   nl.k_thz = Kr_T.data();
   nl.ne_max = neMax.data();
 
-  // z_stage (in units of Ldifr) is where this RK stage samples the external field.
-  auto run_nonlinear = [&](double step, double z_stage) {
-    nl.dz = step;
-    nl.dc = dc_field(ph, z_stage * c::Ldifr);
-    const long long cnt = nonlinear_response(nl, nlws);
+  auto count_clamped = [&](long long cnt) {
     if (cnt > 0 && clamped_total == 0)
       std::printf(" WARNING: I0*|E|^2 >= 1e15 W/cm^2 is beyond the N2.dat/O2.dat tables; "
                   "the last table entry is used (the Fortran code reads past the array)\n");
     clamped_total += cnt;
+  };
+
+  // JefThread_THz; z_stage (in units of Ldifr) is where this RK stage samples the external field.
+  auto run_nonlinear = [&](double step, double z_stage) {
+    nl.dz = step;
+    nl.dc = dc_field(ph, z_stage * c::Ldifr);
+    count_clamped(nonlinear_response(nl, nlws));
+  };
+
+  // JefThread: the optical stage has no DC field (DC_Field = 0d0 before the loop in PARALLEL.f90).
+  auto run_nonlinear_opt = [&](double step) {
+    nl.dz = step;
+    nl.dc = 0.0;
+    count_clamped(nonlinear_response_opt(nl, nlwsO));
+  };
+
+  // HnkThread(k), KdivKZ_opt
+  auto to_kr_and_divide_opt = [&]() {
+    hankel_spectral(HO, HankelInput{Kr_O.data(), nullptr, 0.0, nrO}, K_O.data(), nrO, nqO, nullptr, nullptr);
+    kdivkz(K_O.data(), PO, gO, bandO);
   };
 
   // HnkThread(k), HnkThread(k_THz), KdivKZ
@@ -256,11 +280,109 @@ RunStatus run_simulation(const RunConfig& cfg) {
     kdivkz(K_O.data(), PO, gO, bandO);
   };
 
-  const double k0a0a0 = c::k0 * c::a0 * c::a0;
+  // Et = E; HnkThread(E, Et); FurThread(Et, Dir=-1), with the optical rows of IS and IO, Fl, Or,
+  // Imax and Energy. Both stages do the same.
+  auto optical_diagnostics = [&](Snapshot* snap) {
+    hankel_spectral(HO, HankelInput{E_O.data(), nullptr, 0.0, nrO}, W_O.data(), nrO, nqO, nullptr, nullptr);
+    if (snap) {
+      radial_power(W_O.data(), nrO, nqO, gO, intSp);
+      for (int p = tf.opt_lin_start; p < nqO; ++p) {
+        const int itt = nqO + p;
+        snap->is.f(bandO.fr[itt]).d(2.0 * intSp[p]).nl();
+        snap->io.f(bandO.fr[itt]).d(W_O[p].real()).d(W_O[p].imag()).nl();
+      }
+    }
+
+    spectra_to_time(W_O.data(), nrO, nqO, Et_O.data(), ntO, fftO);
+
+    row_stats(Et_O.data(), nrO, ntO, sumsq, maxsq);
+    for (int i = 0; i < nrO; ++i) {
+      Fl[i] = tf.dt * sumsq[i];
+      if (snap) snap->fl.d(gO.r1[i]).d(Fl[i]).nl();
+    }
+    if (snap) {
+      for (int t = 0; t < ntO; ++t) snap->orr.d((t * tf.dt + tf.tmin) * c::t0 * 1e15).d(Et_O[t]).d(0.0).nl();
+    }
+
+    const double ImaxO = maxsq[0];
+    Imax = 0.0;
+    for (int i = 0; i < nrO; ++i) Imax = std::max(Imax, maxsq[i]);
+    std::printf(" %14.7g Imax = %.15g\n", static_cast<double>(static_cast<float>(z * c::Ldifr)), Imax);
+    fImax.d(z * c::Ldifr).d(Imax).d(ImaxO).nl();
+    fImax.flush();
+
+    double flsum = 0.0;
+    for (int i = 0; i < nrO; ++i) flsum += Fl[i] * gO.r1[i] * gO.dr1[i];
+    const double Energy = 2.0 * c::pi * flsum;
+    std::printf(" %14.7g Energy = %.15g\n", static_cast<double>(static_cast<float>(z * c::Ldifr)), Energy);
+    fEnergy.d(z * c::Ldifr).d(Energy).nl();
+    fEnergy.flush();
+  };
+
+  // Nemax and Den after the first RK stage, Ne(r) into the snapshot, which is then closed.
+  auto plasma_diagnostics = [&](std::unique_ptr<Snapshot>& snap, int z_pos, double dc_kV) {
+    double Nemax = 0.0;
+    for (int i = 0; i < nrO; ++i) Nemax = std::max(Nemax, neMax[i]);
+    std::printf(" %14.7g Ne_max = %.15g\n", static_cast<double>(static_cast<float>(z * c::Ldifr)), Nemax);
+    fNemax.d(z * c::Ldifr).d(Nemax).nl();
+    fNemax.flush();
+    // Den = sum (Ne/N0)*(r/a0)*d(r/a0) over the optical nodes, without 2*pi.
+    double Den = 0.0;
+    for (int i = 0; i < nrO; ++i) Den += neMax[i] * gO.r1[i] * gO.dr1[i];
+    std::printf(" %14.7g Den = %.15g\n", static_cast<double>(static_cast<float>(z * c::Ldifr)), Den);
+    fDen.d(z * c::Ldifr).d(Den).nl();
+    fDen.flush();
+    std::printf(" %14.7g DC = %.15g kV/cm\n", static_cast<double>(static_cast<float>(z * c::Ldifr)), dc_kV);
+    std::printf(" ----------------------------------------------------------- \n");
+
+    if (snap) {
+      for (int i = 0; i < nrO; ++i) snap->ne.d(gO.r1[i]).d(neMax[i]).nl();
+      snap->close();
+      snap.reset();
+      fSnaps.i(z_pos).nl();
+      fSnaps.flush();
+    }
+  };
+
   RunStatus status = RunStatus::Stopped;
   double max_step_time = 0.0;
-  std::printf(" --- Start propagation ---\n");
-  for (;;) {
+  // After every z step of either stage: true when the run has to stop (status Finished at z_max).
+  auto end_of_step = [&](double wall0) -> bool {
+    const double step_time = omp_get_wtime() - wall0;
+    std::printf(" step time %.3f s\n", step_time);
+    std::fflush(stdout);
+    max_step_time = std::max(max_step_time, step_time);
+
+    if (cfg.z_max_cm && z * c::Ldifr >= *cfg.z_max_cm) {
+      status = RunStatus::Finished;
+      return true;
+    }
+    if (cfg.max_steps >= 0 && iz >= cfg.max_steps) return true;
+    // The next step may be a snapshot step, which is slower than the slowest one seen so far.
+    if (cfg.wall_limit_s && omp_get_wtime() - wall_start + 1.5 * max_step_time > *cfg.wall_limit_s) {
+      std::printf(" Wall-clock limit is near, stopping\n");
+      return true;
+    }
+    if (cfg.min_free_bytes) {
+      std::error_code ec;
+      const fs::space_info si = fs::space(out, ec);
+      if (!ec && static_cast<double>(si.available) < *cfg.min_free_bytes) {
+        std::printf(" Free disk space is %.2f GB, stopping\n", static_cast<double>(si.available) / 1e9);
+        return true;
+      }
+    }
+    if (cfg.stop_flag && *cfg.stop_flag) {
+      std::printf(" Stop requested by a signal\n");
+      return true;
+    }
+    return false;
+  };
+
+  bool stopped = false;
+
+  // Optical stage: the optical field alone, JefThread, KdivKZ_opt and LinThread_opt.
+  if (z < z_opt_end) std::printf(" --- Optical stage up to %g cm ---\n", c::opt_stage_end);
+  while (!stopped && z < z_opt_end) {
     const double wall0 = omp_get_wtime();
     dz = static_cast<double>(0.02f) * c::focus / c::Ldifr * 1 / Imax;
     std::printf(" Step %lld\n", iz);
@@ -269,13 +391,60 @@ RunStatus run_simulation(const RunConfig& cfg) {
     int z_pos = 0;
     std::fill(Fl.begin(), Fl.end(), 0.0);
     if (z >= z_flag) {
-      if ((z < 19. / k0a0a0) || (z >= c::snap_dense_end / k0a0a0)) {
-        z_flag = z_flag + 0.25 / k0a0a0;
+      z_flag = z_flag + (z < c::snap_dense_begin / k0a0a0 ? c::snap_sparse : c::snap_opt_dense) / k0a0a0;
+      z_pos = static_cast<int>(z * k0a0a0 * 1e2);
+      snap = open_snapshot(out, z_pos, false);
+      // No THz field yet: its rows of IS and IO are zeros.
+      for (int q = 1; q < nqT; ++q) {
+        const float fr = bandT.fr[nqT + q];
+        snap->is.f(fr).d(0.0).nl();
+        snap->io.f(fr).d(0.0).nl();
+      }
+    }
+
+    optical_diagnostics(snap.get());
+
+    // First RK stage
+    run_nonlinear_opt(dz);
+    plasma_diagnostics(snap, z_pos, 0.0);
+    to_kr_and_divide_opt();
+
+    // Second RK stage at E + k/2
+    hankel_spectral(HO, HankelInput{E_O.data(), K_O.data(), .5, nrO}, W_O.data(), nrO, nqO, nullptr, nullptr);
+    spectra_to_time(W_O.data(), nrO, nqO, Et_O.data(), ntO, fftO);
+    run_nonlinear_opt(dz);
+    to_kr_and_divide_opt();
+
+    add_to(E_O.data(), K_O.data(), nO);
+
+    z = z + dz;
+    iz = iz + 1;
+    std::fill(neMax.begin(), neMax.end(), 0.0);
+
+    // LinThread_opt
+    linear_step(E_O.data(), PO, gO, bandO, tf.opt_lin_start, dz);
+
+    stopped = end_of_step(wall0);
+  }
+
+  // THz stage: the THz field joins, JefThread_THz on nt_all, the external DC field is on.
+  if (!stopped) std::printf(" --- Start propagation ---\n");
+  while (!stopped) {
+    const double wall0 = omp_get_wtime();
+    dz = static_cast<double>(0.02f) * c::focus / c::Ldifr * 1 / Imax;
+    std::printf(" Step %lld\n", iz);
+
+    std::unique_ptr<Snapshot> snap;
+    int z_pos = 0;
+    std::fill(Fl.begin(), Fl.end(), 0.0);
+    if (z >= z_flag) {
+      if ((z < c::snap_dense_begin / k0a0a0) || (z >= c::snap_dense_end / k0a0a0)) {
+        z_flag = z_flag + c::snap_sparse / k0a0a0;
       } else {
-        z_flag = z_flag + static_cast<double>(0.1f) / k0a0a0;
+        z_flag = z_flag + c::snap_dense / k0a0a0;
       }
       z_pos = static_cast<int>(z * k0a0a0 * 1e2);
-      snap = open_snapshot(out, z_pos);
+      snap = open_snapshot(out, z_pos, true);
       write_rows_parallel(snap->kw_thz, nrT, [&](int i, LineBuffer& b) {
         const cplx* row = E_T.data() + static_cast<std::size_t>(i) * nqT;
         const double kr = gT.kr[i];
@@ -300,77 +469,19 @@ RunStatus run_simulation(const RunConfig& cfg) {
       }
     }
 
-    // Et = E; HnkThread(E, Et)
-    hankel_spectral(HO, HankelInput{E_O.data(), nullptr, 0.0, nrO}, W_O.data(), nrO, nqO, nullptr, nullptr);
-    if (fluence) {
-      radial_power(W_O.data(), nrO, nqO, gO, intSp);
-      for (int p = tf.opt_lin_start; p < nqO; ++p) {
-        const int itt = nqO + p;
-        snap->is.f(bandO.fr[itt]).d(2.0 * intSp[p]).nl();
-        snap->io.f(bandO.fr[itt]).d(W_O[p].real()).d(W_O[p].imag()).nl();
-      }
-    }
-
-    // FurThread(Et, Dir=-1)
-    spectra_to_time(W_O.data(), nrO, nqO, Et_O.data(), ntO, fftO);
-
-    row_stats(Et_O.data(), nrO, ntO, sumsq, maxsq);
-    for (int i = 0; i < nrO; ++i) {
-      Fl[i] = tf.dt * sumsq[i];
-      if (fluence) snap->fl.d(gO.r1[i]).d(Fl[i]).nl();
-    }
-    if (fluence) {
-      for (int t = 0; t < ntO; ++t) snap->orr.d((t * tf.dt + tf.tmin) * c::t0 * 1e15).d(Et_O[t]).d(0.0).nl();
-    }
-
-    const double ImaxO = maxsq[0];
-    Imax = 0.0;
-    for (int i = 0; i < nrO; ++i) Imax = std::max(Imax, maxsq[i]);
-    std::printf(" %14.7g Imax = %.15g\n", static_cast<double>(static_cast<float>(z * c::Ldifr)), Imax);
-    fImax.d(z * c::Ldifr).d(Imax).d(ImaxO).nl();
-    fImax.flush();
-
-    double flsum = 0.0;
-    for (int i = 0; i < nrO; ++i) flsum += Fl[i] * gO.r1[i] * gO.dr1[i];
-    const double Energy = 2.0 * c::pi * flsum;
-    std::printf(" %14.7g Energy = %.15g\n", static_cast<double>(static_cast<float>(z * c::Ldifr)), Energy);
-    fEnergy.d(z * c::Ldifr).d(Energy).nl();
-    fEnergy.flush();
+    optical_diagnostics(snap.get());
 
     // First RK stage, field at z
     run_nonlinear(dz, z);
-
-    double Nemax = 0.0;
-    for (int i = 0; i < nrO; ++i) Nemax = std::max(Nemax, neMax[i]);
-    std::printf(" %14.7g Ne_max = %.15g\n", static_cast<double>(static_cast<float>(z * c::Ldifr)), Nemax);
-    fNemax.d(z * c::Ldifr).d(Nemax).nl();
-    fNemax.flush();
-    // Den = sum (Ne/N0)*(r/a0)*d(r/a0) over the optical nodes, without 2*pi.
-    double Den = 0.0;
-    for (int i = 0; i < nrO; ++i) Den += neMax[i] * gO.r1[i] * gO.dr1[i];
-    std::printf(" %14.7g Den = %.15g\n", static_cast<double>(static_cast<float>(z * c::Ldifr)), Den);
-    fDen.d(z * c::Ldifr).d(Den).nl();
-    fDen.flush();
-    std::printf(" %14.7g DC = %.15g kV/cm\n", static_cast<double>(static_cast<float>(z * c::Ldifr)),
-                dc_field_kV(z * c::Ldifr));
-    std::printf(" ----------------------------------------------------------- \n");
-
-    if (fluence) {
-      for (int i = 0; i < nrO; ++i) snap->ne.d(gO.r1[i]).d(neMax[i]).nl();
-      snap->close();
-      snap.reset();
-      fSnaps.i(z_pos).nl();
-      fSnaps.flush();
-    }
-
+    plasma_diagnostics(snap, z_pos, dc_field_kV(z * c::Ldifr));
     to_kr_and_divide();
 
     // Second RK stage at E + k/2: Ebuf = E_THz + .5*k_THz, Et = E + .5*k
     hankel_spectral(HT, HankelInput{E_T.data(), K_T.data(), .5, nrT}, B_T.data(), nrO, nqT, PT.cut.data(), nullptr);
     hankel_spectral(HO, HankelInput{E_O.data(), K_O.data(), .5, nrO}, W_O.data(), nrO, nqO, nullptr, nullptr);
     spectra_to_time(W_O.data(), nrO, nqO, Et_O.data(), ntO, fftO);
-    // The source depends on z through DC(z), so the midpoint stage samples it at z + dz/2.
-    run_nonlinear(dz, z + 0.5 * dz);
+    // The Fortran window sets DC_Field once per step; the smooth profiles are sampled at the midpoint z + dz/2.
+    run_nonlinear(dz, c::dc_profile == 4 ? z : z + 0.5 * dz);
     to_kr_and_divide();
 
     add_to(E_O.data(), K_O.data(), nO);
@@ -384,33 +495,7 @@ RunStatus run_simulation(const RunConfig& cfg) {
     linear_step(E_T.data(), PT, gT, bandT, 0, dz);
     linear_step(E_O.data(), PO, gO, bandO, tf.opt_lin_start, dz);
 
-    const double step_time = omp_get_wtime() - wall0;
-    std::printf(" step time %.3f s\n", step_time);
-    std::fflush(stdout);
-    max_step_time = std::max(max_step_time, step_time);
-
-    if (cfg.z_max_cm && z * c::Ldifr >= *cfg.z_max_cm) {
-      status = RunStatus::Finished;
-      break;
-    }
-    if (cfg.max_steps >= 0 && iz >= cfg.max_steps) break;
-    // The next step may be a snapshot step, which is slower than the slowest one seen so far.
-    if (cfg.wall_limit_s && omp_get_wtime() - wall_start + 1.5 * max_step_time > *cfg.wall_limit_s) {
-      std::printf(" Wall-clock limit is near, stopping\n");
-      break;
-    }
-    if (cfg.min_free_bytes) {
-      std::error_code ec;
-      const fs::space_info si = fs::space(out, ec);
-      if (!ec && static_cast<double>(si.available) < *cfg.min_free_bytes) {
-        std::printf(" Free disk space is %.2f GB, stopping\n", static_cast<double>(si.available) / 1e9);
-        break;
-      }
-    }
-    if (cfg.stop_flag && *cfg.stop_flag) {
-      std::printf(" Stop requested by a signal\n");
-      break;
-    }
+    stopped = end_of_step(wall0);
   }
 
   fImax.close();
@@ -425,6 +510,7 @@ RunStatus run_simulation(const RunConfig& cfg) {
     st.z = z;
     st.z_flag = z_flag;
     st.Imax = Imax;
+    st.stage = z < z_opt_end ? 0 : 1;
     write_checkpoint(cfg.checkpoint_path, sz, st, E_O, E_T);
     std::printf(" Checkpoint written to %s at step %lld, z = %.15g cm\n", path_string(cfg.checkpoint_path).c_str(),
                 iz, z * c::Ldifr);

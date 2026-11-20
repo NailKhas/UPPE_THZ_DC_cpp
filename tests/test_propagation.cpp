@@ -70,10 +70,10 @@ void check_propagator(const Propagator& P, const Band& b, const RadialGrid& g, r
   }
   CHECK(cutOk);
   CHECK(P.cut[0] == 0);
-  // The test grid must exercise the truncation. krmax in units of 1/a0 grows with a0, so for a0 above
-  // the Fortran value (focus 20, zsic 18) the small grid stays below the cut; the truncation code
-  // itself does not depend on a0.
-  if (c::a0 <= c::a00 * (1 - 18.0 / 20.0)) CHECK(partial > 0);
+  // The truncation must be exercised wherever the grid reaches past 2*krmax of the lowest bin, beyond which
+  // the filter is exactly 0. krmax in units of 1/a0 grows with a0, so at the f75 a0 only the THz test grid
+  // does; the truncation code itself does not depend on a0.
+  if (g.kr.back() > 2.0 * b.krmax[nq + 1] && g.kr.front() < b.krmax[nq + 1]) CHECK(partial > 0);
 }
 
 }  // namespace
@@ -109,7 +109,7 @@ int main() {
 
   // Optical band, propagated from bin qStart only.
   {
-    // nR = nR_opt = 20 puts kr up to ~2.9, beyond krmax of the lowest optical bins.
+    // nR = nR_opt = 20 puts kr up to j_19/Rmax (about 9.8 at Rmax = 6, below krmax of every optical bin).
     const RadialGrid g = make_radial(roots, 20, 20, RadialKind::Optical);
     const Band b = make_band(tf.ntO, tf.dw, tf.wmin);
     const Propagator P = make_propagator(b, g, vg, c::omega_max);

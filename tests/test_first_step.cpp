@@ -15,7 +15,7 @@ namespace fs = std::filesystem;
 int main() {
   test::init();
 
-  // ntO = 2048 (nq = 1024) keeps the carrier bin int(w0*t0/dw) = 543 inside the band, as in production.
+  // ntO = 2048 (nq = 1024) keeps the carrier bin int(w0*t0/dw) = 281 inside the band, as in production.
   const TimeFreq tf = make_time_freq(131072);
   const int nq = tf.nqO;
   const int it_inc = static_cast<int>(c::w0 * c::t0 / tf.dw);
@@ -31,17 +31,16 @@ int main() {
   const Band b = make_band(tf.ntO, tf.dw, tf.wmin);
   const double vg = 1.0003;
   const double dz = c::zsic / c::Ldifr;
-  const double dz0 = 400. / c::Ldifr;
 
   const fs::path out = fs::temp_directory_path() / "uppe_test_first_step";
   fs::remove_all(out);
   fs::create_directories(out);
 
   std::vector<cplx> eOut(static_cast<std::size_t>(nrKeep) * nq, cplx(0.0, 0.0));
-  first_step(tf, b, g, H, vg, dz, dz0, nrKeep, eOut.data(), out);
+  first_step(tf, b, g, H, vg, dz, nrKeep, eOut.data(), out);
 
   ref::Kz K = ref::kz_tables(b, g, vg);
-  const ref::Vec R = ref::first_step(tf, b, g, RH, K, dz, dz0);
+  const ref::Vec R = ref::first_step(tf, b, g, RH, K, dz);
 
   std::vector<cplx> expect(eOut.size());
   int active = 0;

@@ -15,6 +15,7 @@ struct LoopState {
   double z = 0.0;
   double z_flag = 0.0;
   double Imax = 0.0;
+  int stage = 0;  // 0 = optical stage (z < c::opt_stage_end), 1 = THz stage
 };
 
 // Binary dump of the loop state and both fields. The file is written as <file>.tmp and then

@@ -17,34 +17,34 @@ inline constexpr double N0 = 2.7e19;
 inline constexpr double tmin_THz = -800.0;
 inline constexpr double tmax_THz = 800.0;
 
-inline constexpr double Rmax = 20.0;
+inline constexpr double Rmax = 6.0;
 
-// Focal distance, cm; set at configure time with -DUPPE_FOCUS_CM=<cm> (the Fortran value is 20).
+// Focal distance, cm; set at configure time with -DUPPE_FOCUS_CM=<cm> (the Fortran value is 75).
 #ifndef UPPE_FOCUS_CM
-#define UPPE_FOCUS_CM 20.0
+#define UPPE_FOCUS_CM 75.0
 #endif
 inline constexpr double focus = UPPE_FOCUS_CM;
-// Start distance of the propagation (the first step), cm; -DUPPE_ZSIC_CM=<cm> (the Fortran value is 18).
+// Start distance of the propagation (the first step), cm; -DUPPE_ZSIC_CM=<cm> (the Fortran value is 56.25).
 #ifndef UPPE_ZSIC_CM
-#define UPPE_ZSIC_CM 18.0
+#define UPPE_ZSIC_CM 56.25
 #endif
 inline constexpr double zsic = UPPE_ZSIC_CM;
 static_assert(zsic < focus, "zsic must be less than focus");
 inline constexpr double t1 = 44.0e-15;
-inline constexpr double t0 = 54.0e-15;
+inline constexpr double t0 = 30.0e-15;
 inline constexpr double t00 = 20.4e-15;
-inline constexpr double a00 = 0.1;
+inline constexpr double a00 = 0.3;
 inline constexpr double a0 = a00 * (1 - zsic / focus);
 inline constexpr double err = static_cast<double>(1e-12f);
 
-inline constexpr double lmbd0 = 744e-7;
+inline constexpr double lmbd0 = 800e-7;
 inline constexpr double lmbd1 = 400e-7;
 inline constexpr double w0 = 2 * pi * cL / lmbd0;
 inline constexpr double k0 = 2 * pi / lmbd0;
 inline constexpr double Ldifr = k0 * a0 * a0;
 inline constexpr double w1 = 2 * pi * cL / lmbd1;
 
-inline constexpr double omega_max = 5 * w0 * t0;
+inline constexpr double omega_max = 7 * w0 * t0;
 inline constexpr double omega_max_THz = 90.e12 * t0 * 2. * pi;
 inline constexpr double alpha_max = pi / 180.0 * 80.0;
 
@@ -56,19 +56,22 @@ inline constexpr double n2 = 1.0e-19;
 inline constexpr double WN2 = 15.5;
 inline constexpr double WO2 = 12.2;
 
-inline constexpr double WW0 = 0.5e-3;
+inline constexpr double WW0 = 1.e-3;
 
 // External DC field profile along z; -DUPPE_DC_PROFILE=<id>.
-//   0: constant 10 kV/cm (the Fortran value);
+//   0: constant 10 kV/cm;
 //   1: dc_amp*(1/(1+exp(-dc_rate*(z-dc_z0))) - 1/2)*exp(-((z-dc_z0)/dc_width)^dc_order) kV/cm, z in cm;
 //   2: dc_sg_amp*exp(-((z-dc_sg_z0)/dc_width)^dc_sg_order) kV/cm, z in cm;
-//   3: dc_sin_amp*sin(z*2*pi*dc_sin_cycles/dc_sin_span) kV/cm, z in cm.
+//   3: dc_sin_amp*sin(z*2*pi*dc_sin_cycles/dc_sin_span) kV/cm, z in cm;
+//   4: 10 kV/cm for dc_win_begin <= z < dc_win_end, 0 elsewhere (the Fortran f75 value).
 #ifndef UPPE_DC_PROFILE
-#define UPPE_DC_PROFILE 1
+#define UPPE_DC_PROFILE 4
 #endif
 inline constexpr int dc_profile = UPPE_DC_PROFILE;
-static_assert(dc_profile >= 0 && dc_profile <= 3,
-              "UPPE_DC_PROFILE must be 0 (constant), 1 (sigmoid window), 2 (super-Gaussian) or 3 (sine)");
+static_assert(dc_profile >= 0 && dc_profile <= 4,
+              "UPPE_DC_PROFILE must be 0 (constant), 1 (sigmoid window), 2 (super-Gaussian), 3 (sine) or 4 (window)");
+inline constexpr double dc_win_begin = 71.0;
+inline constexpr double dc_win_end = static_cast<double>(76.1f);
 inline constexpr double dc_amp = 20.0;
 inline constexpr double dc_rate = 5.0;
 inline constexpr double dc_z0 = 20.373;
@@ -83,9 +86,17 @@ inline constexpr double dc_sin_span = 3.0;
 // Full-precision pi for the spatial sine phase (c::pi is the truncated Fortran value).
 inline constexpr double dc_sin_pi = 3.14159265358979323846;
 
-// Snapshots are written every 0.1 cm for 19 cm <= z < snap_dense_end, every 0.25 cm elsewhere.
-// The Fortran end, 20.2 cm, is kept for the constant field; the profiles along z are centred near 20.5 cm.
-inline constexpr double snap_dense_end = dc_profile == 0 ? static_cast<double>(20.2f) : 21.5;
+// The optical stage (no THz field, no DC field) runs up to opt_stage_end cm; the THz stage follows.
+inline constexpr double opt_stage_end = 71.0;
+// The first snapshot is due at snap_start cm. Spacing in the optical stage: snap_sparse cm below
+// snap_dense_begin, snap_opt_dense cm from there on. In the THz stage: snap_dense cm for
+// snap_dense_begin <= z < snap_dense_end, snap_sparse cm elsewhere.
+inline constexpr double snap_start = 56.0;
+inline constexpr double snap_sparse = 5.0;
+inline constexpr double snap_opt_dense = 1.0;
+inline constexpr double snap_dense = static_cast<double>(0.1f);
+inline constexpr double snap_dense_begin = 70.0;
+inline constexpr double snap_dense_end = 80.0;
 
 // InitConsts reads indices 0..9998 of P_N2/P_O2 from N2.dat/O2.dat.
 inline constexpr int ion_table_size = 9999;
@@ -96,8 +107,8 @@ inline constexpr int ion_table_size = 9999;
 struct Sizes {
   int nt_all = 1024 * 16 * 32;
   int nR_first = 16000;  // initial value of nR, used by FirstStep
-  int nR_opt = 1000;
-  int nR_THz = 5000;
+  int nR_opt = 3000;
+  int nR_THz = 7500;
 };
 
 struct TimeFreq {

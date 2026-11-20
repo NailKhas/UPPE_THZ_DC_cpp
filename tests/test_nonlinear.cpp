@@ -110,6 +110,27 @@ void run_case(const Case& cs, test::Rng& rng) {
   in.ne_max = big.data();
   nonlinear_response(in, ws);
   for (int ir = 0; ir < nr; ++ir) CHECK(big[ir] == 10.0);
+
+  // JefThread: the optical field alone on the ntO grid.
+  NonlinearOptWorkspace wsO(tf, max_threads());
+  std::fill(kOpt.begin(), kOpt.end(), cplx(9.0, 9.0));
+  std::vector<double> neMaxO(nr, 0.0);
+  in.ne_max = neMaxO.data();
+  const long long clampedO = nonlinear_response_opt(in, wsO);
+  const ref::JefResult RO = ref::jef_thread_opt(tf, ph, etFull, nr, dz, in.dc);
+  CHECK(RO.ionizing_samples > 0);
+  CHECK(clampedO == RO.clamped);
+  CHECK((clampedO > 0) == cs.expectClamp);
+  for (int ir = 0; ir < nr; ++ir) {
+    const cplx* ro = RO.k.data() + static_cast<std::size_t>(ir) * tf.ntO;
+    // Unlike JefThread_THz, no window is zeroed: every bin but w = 0 and the Nyquist bin is kept.
+    CHECK(antihermitian_defect(ro, tf.ntO, 1) < 1e-9);
+    CHECK(ro[tf.nqO + 1] != cplx(0.0, 0.0));
+    for (int p = 0; p < tf.nqO; ++p) expOpt[static_cast<std::size_t>(ir) * tf.nqO + p] = ro[tf.nqO + p];
+    CHECK(neMaxO[ir] > 0.0);
+    CHECK_CLOSE(neMaxO[ir], RO.ne_max[ir], 1e-12 * RO.ne_max[ir]);
+  }
+  CHECK(test::rel_err(kOpt.data(), expOpt.data(), kOpt.size()) < 1e-9);
 }
 
 }  // namespace
@@ -121,7 +142,7 @@ int main() {
   run_case({400.0, true, 10.0}, rng);
   run_case({3.0, false, 0.0}, rng);
   run_case({3.0, false, -10.0}, rng);
-  // A field comparable to the optical one (DC_norm is ~8.4e-5 per kV/cm), so the DC terms are not lost
+  // A field comparable to the optical one (DC_norm is ~1.3e-4 per kV/cm), so the DC terms are not lost
   // in the 1e-9 tolerance.
   run_case({3.0, false, -30000.0}, rng);
   return test::finish("test_nonlinear");

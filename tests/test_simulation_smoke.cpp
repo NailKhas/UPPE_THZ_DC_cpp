@@ -1,8 +1,10 @@
-// Runs two z steps of the full program on a reduced grid and checks that the outputs are sane.
+// Runs the full program on a reduced grid from zsic through the optical stage into the THz stage
+// and checks that the outputs are sane.
 // Usage: test_simulation_smoke <data dir with N2.dat and O2.dat>
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -48,6 +50,17 @@ int count_files(const fs::path& dir) {
   return n;
 }
 
+// z_pos of the snapshot files Z<z_pos>.dat in dir.
+std::vector<int> snapshot_positions(const fs::path& dir) {
+  std::vector<int> v;
+  if (!fs::is_directory(dir)) return v;
+  for (const auto& e : fs::directory_iterator(dir)) {
+    const std::string name = e.path().filename().string();
+    if (name.size() > 5 && name[0] == 'Z') v.push_back(std::atoi(name.c_str() + 1));
+  }
+  return v;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -58,14 +71,16 @@ int main(int argc, char** argv) {
   cfg.sizes.nR_first = 200;
   cfg.sizes.nR_opt = 20;
   cfg.sizes.nR_THz = 60;
-  cfg.max_steps = 2;
+  // Past the end of the optical stage (71 cm) and the first THz-stage snapshot.
+  cfg.z_max_cm = c::opt_stage_end + 0.2;
+  cfg.max_steps = 100000;
   cfg.data_dir = argc > 1 ? fs::path(argv[1]) : fs::path("data");
   cfg.out_dir = fs::temp_directory_path() / "uppe_test_smoke";
   fs::remove_all(cfg.out_dir);
   fs::create_directories(cfg.out_dir);
 
   try {
-    run_simulation(cfg);
+    CHECK(run_simulation(cfg) == RunStatus::Finished);
   } catch (const std::exception& e) {
     std::fprintf(stderr, "run_simulation failed: %s\n", e.what());
     return 1;
@@ -74,23 +89,28 @@ int main(int argc, char** argv) {
   const fs::path res = cfg.out_dir / "res";
 
   const auto imax = read_table(res / "Imax.dat");
-  CHECK(imax.size() == 2);
+  CHECK(imax.size() >= 3);
   CHECK(all_finite(imax));
   for (const auto& r : imax) {
     CHECK(r.size() == 3);
     if (r.size() == 3) CHECK(r[1] > 0.0 && r[2] > 0.0 && r[2] <= r[1]);
   }
-  if (imax.size() == 2) CHECK(imax[1][0] > imax[0][0]);  // z increases
+  for (std::size_t k = 1; k < imax.size(); ++k) CHECK(imax[k][0] > imax[k - 1][0]);  // z increases
+  if (!imax.empty()) CHECK_CLOSE(imax[0][0], c::zsic, 1e-9);
+  // Steps on both sides of the stage boundary.
+  int optSteps = 0, thzSteps = 0;
+  for (const auto& r : imax) (r[0] < c::opt_stage_end ? optSteps : thzSteps)++;
+  CHECK(optSteps > 0 && thzSteps > 0);
 
   const auto energy = read_table(res / "Energy.dat");
-  CHECK(energy.size() == 2);
+  CHECK(energy.size() == imax.size());
   CHECK(all_finite(energy));
   for (const auto& r : energy) CHECK(r.size() == 2 && r[1] > 0.0);
   // Two short steps in weak nonlinearity cannot change the energy much.
-  if (energy.size() == 2) CHECK(std::fabs(energy[1][1] / energy[0][1] - 1.0) < 0.1);
+  if (energy.size() >= 2) CHECK(std::fabs(energy[1][1] / energy[0][1] - 1.0) < 0.1);
 
   const auto nemax = read_table(res / "Nemax.dat");
-  CHECK(nemax.size() == 2);
+  CHECK(nemax.size() == imax.size());
   CHECK(all_finite(nemax));
   for (const auto& r : nemax) CHECK(r.size() == 2 && r[1] >= 0.0 && r[1] <= 1.0);
 
@@ -102,6 +122,27 @@ int main(int argc, char** argv) {
     if (den[k].size() == 2 && nemax[k].size() == 2) CHECK(den[k][0] == nemax[k][0]);
 
   for (const char* d : {"IS", "Fl", "kw_THz", "Or", "Ne", "IO"}) CHECK(count_files(res / d) >= 1);
+  // Snapshots: zsic (the first step, z_flag = 56), then 61 and 66 cm in the optical stage, from 71 cm every
+  // 0.1 cm in the THz stage; kw_THz only in the THz stage.
+  const auto snaps = read_table(res / "snapshots.txt");
+  CHECK(snaps.size() >= 4);
+  if (!snaps.empty()) CHECK(std::fabs(snaps[0][0] - 100 * c::zsic) <= 1.0);
+  CHECK(count_files(res / "IS") == static_cast<int>(snaps.size()));
+  int optSnaps = 0;
+  for (const auto& r : snaps) optSnaps += r[0] < 100 * c::opt_stage_end;
+  CHECK(optSnaps == 3);
+  for (int zp : snapshot_positions(res / "kw_THz")) CHECK(zp >= 100 * c::opt_stage_end);
+  CHECK(count_files(res / "kw_THz") == static_cast<int>(snaps.size()) - optSnaps);
+  if (!snaps.empty()) {
+    // THz rows of IS and IO in the optical stage are zeros.
+    char name[32];
+    std::snprintf(name, sizeof name, "Z%04d.dat", static_cast<int>(snaps[0][0]));
+    const auto is = read_table(res / "IS" / name);
+    const auto io = read_table(res / "IO" / name);
+    CHECK(!is.empty() && is[0].size() == 2 && is[0][1] == 0.0);
+    CHECK(!io.empty() && io[0].size() == 2 && io[0][1] == 0.0);
+    CHECK(is.size() == io.size());
+  }
   // kw_THz may contain nan (asin of an argument > 1, as in the Fortran); the others must be finite.
   for (const char* d : {"IS", "Fl", "Or", "Ne", "IO"}) {
     if (!fs::is_directory(res / d)) continue;

@@ -12,28 +12,29 @@ on:
       z_max:
         description: "Stop distance --z-max, cm (none = no limit, the chain ends at max_segments)"
         required: true
-        default: "30"
+        default: "85"
       focus:
         description: "Focal distance, cm (compiled in; pinned for the whole chain)"
         required: true
-        default: "20"
+        default: "75"
       zsic:
         description: "Start distance of the propagation (the first step), cm, less than focus (compiled in)"
         required: true
-        default: "18"
+        default: "56.25"
       dc_profile:
         description: "External DC field along z (compiled in; pinned for the whole chain)"
         type: choice
         options:
+          - WINDOW
           - SIGMOID_WINDOW
           - SUPERGAUSS
           - SINE
           - CONST
-        default: SIGMOID_WINDOW
+        default: WINDOW
       tag:
         description: "Chain name (letters, digits, . _ -): release sim-<tag>, artifacts kw-<tag>-segNN"
         required: true
-        default: "z30"
+        default: "f75"
       segment:
         description: "Segment number (1 starts a new chain; later segments are dispatched automatically)"
         required: true
@@ -88,9 +89,9 @@ jobs:
       # Minutes kept after the simulation for the last streaming pass, packing and uploads
       # (a full disk of kw_THz, ~70 GB, packs in ~13 min and uploads in ~4 min).
       RESERVE: "25"
-      # The simulation stops with a checkpoint when less is free: room for one more snapshot (1.35 GB),
-      # the checkpoint (0.7 GB) and packing.
-      MIN_FREE_GB: "6"
+      # The simulation stops with a checkpoint when less is free: room for one more snapshot (2.0 GB),
+      # the checkpoint (1.2 GB) and packing.
+      MIN_FREE_GB: "8"
       OMP_PROC_BIND: close
       OMP_PLACES: cores
     steps:

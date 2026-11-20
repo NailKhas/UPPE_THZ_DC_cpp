@@ -158,11 +158,70 @@ struct JefResult {
   long long ionizing_samples = 0;
 };
 
+// The time loop of JefThread and JefThread_THz on E1(0:N-1): returns P, dJ_dt (as Ppl) and Ohm,
+// already transformed with the Fortran forward FFT; updates R.ne_max(ir) and the counters.
+struct Media {
+  Vec P, Ppl, Ohm;
+};
+
+inline Media medium(const uppe::TimeFreq& tf, const uppe::Physics& ph, const Vec& E1, double DC, int ir,
+                    JefResult& R) {
+  const int N = static_cast<int>(E1.size());
+  const double dt = tf.dt;
+  double Ne_N2 = 0, Ne_O2 = 0, VelInt_N2 = 0, VelInt_O2 = 0, Ne_crt = 0;
+  Vec P(N), Ppl(N), Ohm(N), dJ_dt(N), Photocurrent(N);
+  cplx E_prv = E1[0];
+  P[0] = E_prv * std::pow(std::abs(E_prv), 2);
+  Ppl[0] = 0.0;
+  Ohm[0] = 0.0;
+  for (int iit = 1; iit < N; ++iit) {
+    const cplx E_crt = E1[iit];
+    const double E_abs2 = std::pow(std::abs(E_crt), 2);
+    P[iit] = E_crt * E_abs2 + 3.0 * E_abs2 * DC + 3.0 * E_crt * DC * DC;
+    const double Ne_N2_prv = Ne_N2, Ne_O2_prv = Ne_O2;
+    if (ph.I0 * E_abs2 > 1e11) {
+      ++R.ionizing_samples;
+      const double v = std::floor(ph.I0 * E_abs2 * 1e-11);
+      int idx;
+      if (v > c::ion_table_size - 1) {
+        idx = c::ion_table_size - 1;
+        ++R.clamped;
+      } else {
+        idx = static_cast<int>(v);
+      }
+      VelInt_N2 = VelInt_N2 + ph.P_N2[idx] * c::t0 / (10e-15) * dt;
+      VelInt_O2 = VelInt_O2 + ph.P_O2[idx] * c::t0 / (10e-15) * dt;
+      Ne_N2 = 0.78 * (1.0 - std::exp(-VelInt_N2));
+      Ne_O2 = 0.22 * (1.0 - std::exp(-VelInt_O2));
+      const double dNe_N2 = Ne_N2 - Ne_N2_prv;
+      const double dNe_O2 = Ne_O2 - Ne_O2_prv;
+      Ne_crt = Ne_N2 + Ne_O2;
+      Ohm[iit] = ph.ROhm * (dNe_O2 * c::WO2 + dNe_N2 * c::WN2) / dt / std::conj(E_crt);
+    } else {
+      Ohm[iit] = 0.0;
+    }
+    Ppl[iit] = Ne_crt * (E_crt + DC);
+    E_prv = E_crt;
+  }
+
+  dJ_dt[0] = 0.0;
+  Photocurrent[0] = 0.0;
+  for (int iit = 0; iit <= N - 2; ++iit) {
+    dJ_dt[iit] = Ppl[iit] - c::omega_collide * Photocurrent[iit];
+    cplx JBuff = Photocurrent[iit] + dt * dJ_dt[iit];
+    JBuff = Ppl[iit + 1] - c::omega_collide * JBuff;
+    Photocurrent[iit + 1] = Photocurrent[iit] + dt * (dJ_dt[iit] + JBuff) / 2.0;
+  }
+  dJ_dt[N - 1] = dJ_dt[N - 2];
+  if (Ne_crt > R.ne_max[ir]) R.ne_max[ir] = Ne_crt;
+
+  return Media{fortran_forward(P), fortran_forward(dJ_dt), fortran_forward(Ohm)};
+}
+
 // JefThread_THz. ebuf: [ir][ntT] THz field (w,r); et: [ir][ntO] optical field (t,r); DC: external field.
 inline JefResult jef_thread(const uppe::TimeFreq& tf, const uppe::Physics& ph, const Vec& ebuf, const Vec& et,
                             int nr, double dz, double DC) {
   const int N = tf.nt_all, ntO = tf.ntO, ntT = tf.ntT;
-  const double dt = tf.dt;
   JefResult R;
   R.k.assign(static_cast<std::size_t>(nr) * ntO, cplx(0.0, 0.0));
   R.k_thz.assign(static_cast<std::size_t>(nr) * ntT, cplx(0.0, 0.0));
@@ -178,57 +237,10 @@ inline JefResult jef_thread(const uppe::TimeFreq& tf, const uppe::Physics& ph, c
     E1 = fortran_backward(E1);
     for (int t = 0; t < ntO; ++t) E1[N / 2 - ntO / 2 + t] += et[static_cast<std::size_t>(ir) * ntO + t];
 
-    double Ne_N2 = 0, Ne_O2 = 0, VelInt_N2 = 0, VelInt_O2 = 0, Ne_crt = 0;
-    Vec P(N), Ppl(N), Ohm(N), dJ_dt(N), Photocurrent(N);
-    cplx E_prv = E1[0];
-    P[0] = E_prv * std::pow(std::abs(E_prv), 2);
-    Ppl[0] = 0.0;
-    Ohm[0] = 0.0;
-    for (int iit = 1; iit < N; ++iit) {
-      const cplx E_crt = E1[iit];
-      const double E_abs2 = std::pow(std::abs(E_crt), 2);
-      P[iit] = E_crt * E_abs2 + 3.0 * E_abs2 * DC + 3.0 * E_crt * DC * DC;
-      const double Ne_N2_prv = Ne_N2, Ne_O2_prv = Ne_O2;
-      if (ph.I0 * E_abs2 > 1e11) {
-        ++R.ionizing_samples;
-        const double v = std::floor(ph.I0 * E_abs2 * 1e-11);
-        int idx;
-        if (v > c::ion_table_size - 1) {
-          idx = c::ion_table_size - 1;
-          ++R.clamped;
-        } else {
-          idx = static_cast<int>(v);
-        }
-        VelInt_N2 = VelInt_N2 + ph.P_N2[idx] * c::t0 / (10e-15) * dt;
-        VelInt_O2 = VelInt_O2 + ph.P_O2[idx] * c::t0 / (10e-15) * dt;
-        Ne_N2 = 0.78 * (1.0 - std::exp(-VelInt_N2));
-        Ne_O2 = 0.22 * (1.0 - std::exp(-VelInt_O2));
-        const double dNe_N2 = Ne_N2 - Ne_N2_prv;
-        const double dNe_O2 = Ne_O2 - Ne_O2_prv;
-        Ne_crt = Ne_N2 + Ne_O2;
-        Ohm[iit] = ph.ROhm * (dNe_O2 * c::WO2 + dNe_N2 * c::WN2) / dt / std::conj(E_crt);
-      } else {
-        Ohm[iit] = 0.0;
-      }
-      Ppl[iit] = Ne_crt * (E_crt + DC);
-      E_prv = E_crt;
-    }
-
-    dJ_dt[0] = 0.0;
-    Photocurrent[0] = 0.0;
-    for (int iit = 0; iit <= N - 2; ++iit) {
-      dJ_dt[iit] = Ppl[iit] - c::omega_collide * Photocurrent[iit];
-      cplx JBuff = Photocurrent[iit] + dt * dJ_dt[iit];
-      JBuff = Ppl[iit + 1] - c::omega_collide * JBuff;
-      Photocurrent[iit + 1] = Photocurrent[iit] + dt * (dJ_dt[iit] + JBuff) / 2.0;
-    }
-    dJ_dt[N - 1] = dJ_dt[N - 2];
-    if (Ne_crt > R.ne_max[ir]) R.ne_max[ir] = Ne_crt;
-    Ppl = dJ_dt;
-
-    P = fortran_forward(P);
-    Ppl = fortran_forward(Ppl);
-    Ohm = fortran_forward(Ohm);
+    const Media M = medium(tf, ph, E1, DC, ir, R);
+    const Vec& P = M.P;
+    const Vec& Ppl = M.Ppl;
+    const Vec& Ohm = M.Ohm;
 
     Vec kbuf(N);
     for (int m = 0; m < N; ++m)
@@ -242,9 +254,33 @@ inline JefResult jef_thread(const uppe::TimeFreq& tf, const uppe::Physics& ph, c
   return R;
 }
 
+// JefThread. et: [ir][ntO] optical field (t,r); DC: external field. Only R.k ([ir][ntO]) is filled.
+inline JefResult jef_thread_opt(const uppe::TimeFreq& tf, const uppe::Physics& ph, const Vec& et, int nr, double dz,
+                                double DC) {
+  const int ntO = tf.ntO;
+  JefResult R;
+  R.k.assign(static_cast<std::size_t>(nr) * ntO, cplx(0.0, 0.0));
+  R.ne_max.assign(nr, 0.0);
+
+  std::vector<double> freqs(ntO, 0.0);
+  for (int m = 1; m < ntO; ++m) freqs[m] = tf.dw * m + tf.wmin;
+
+  for (int ir = 0; ir < nr; ++ir) {
+    const Vec E1(et.begin() + static_cast<std::ptrdiff_t>(ir) * ntO, et.begin() + static_cast<std::ptrdiff_t>(ir + 1) * ntO);
+    const Media M = medium(tf, ph, E1, DC, ir, R);
+    Vec kbuf(ntO);
+    for (int m = 0; m < ntO; ++m)
+      kbuf[m] = (J * M.P[m] * ph.RKer * std::pow(freqs[m], 2) + M.Ohm[m] * freqs[m] - ph.RDru * J * M.Ppl[m]) * dz;
+    kbuf[0] = 0.0;
+    kbuf[ntO / 2] = 0.0;
+    for (int iit = 0; iit < ntO; ++iit) R.k[static_cast<std::size_t>(ir) * ntO + iit] = kbuf[iit];
+  }
+  return R;
+}
+
 // FirstStep on the grid g; returns Ebuf(0:nt-1, 1:n) with layout [iit][ir].
 inline Vec first_step(const uppe::TimeFreq& tf, const uppe::Band& b, const uppe::RadialGrid& g, const Hankel& H, Kz& K,
-                      double dz, double dz0) {
+                      double dz) {
   const int nt = tf.ntO, n = H.n;
   Vec Origin(nt);
   for (int iit = 0; iit < nt; ++iit) {
@@ -254,19 +290,21 @@ inline Vec first_step(const uppe::TimeFreq& tf, const uppe::Band& b, const uppe:
   Origin = fortran_forward(Origin);
   double ISm = 0.0;
   for (int iit = nt / 2; iit < nt; ++iit) ISm = std::max(ISm, std::pow(std::abs(Origin[iit]), 2));
-  const double foc_ph = .5 * std::pow(c::a0, 2) / (c::focus * c::t0 * c::cL);
 
   Vec Ebuf(static_cast<std::size_t>(nt) * n, cplx(0.0, 0.0));
   for (int iit = nt / 2 + 1; iit < nt; ++iit) {
     if (!(std::pow(std::abs(Origin[iit]), 2) > ISm * 1e-30)) continue;
     Vec Sp(n);
-    for (int i = 0; i < n; ++i) Sp[i] = Origin[iit] * std::exp(-std::pow(g.r1[i] * c::a0, 16) / std::pow(c::a00, 16));
-    Sp = hnk(H, Sp);
-    for (int i = 0; i < n; ++i)
-      Sp[i] = Sp[i] * std::exp(-K.at(K.kz, iit, i) * dz0) * std::exp(-std::pow(g.kr[i] / b.krmax[iit], 20));
-    Sp = hnk(H, Sp);
-    for (int i = 0; i < n; ++i)
-      Sp[i] = Sp[i] * std::exp(-std::pow(g.r1[i] * c::a0, 8)) * std::exp(J * foc_ph * std::pow(g.r1[i], 2) * b.freqs[iit]);
+    // NPI (for UPPE optical propagator)
+    for (int i = 0; i < n; ++i) {
+      const double fpr = std::sqrt(std::pow(c::focus, 2) + std::pow(c::a0, 2) * std::pow(g.r1[i], 2));
+      const double r = 2. * c::focus / g.r1[i] / c::a0 * (fpr - c::focus);
+      const double alfa1 = std::atan(r / 2. / c::focus);
+      const double delta = (1. + 1. / std::cos(2. * alfa1)) * std::pow(r, 2) / 4. / c::focus;
+      Sp[i] = Origin[iit] * std::exp(-.5 * std::pow(r, 2) / std::pow(c::a00, 2)) * (r / g.r1[i] / c::a0) *
+              std::sqrt(c::focus / fpr) / std::sqrt(std::cos(2. * alfa1)) *
+              std::exp(J * b.freqs[iit] / c::t0 / c::cL * delta);
+    }
     Sp = hnk(H, Sp);
     for (int i = 0; i < n; ++i)
       Sp[i] = Sp[i] * std::exp(-K.at(K.kz, iit, i) * dz) * std::exp(-std::pow(g.kr[i] / b.krmax[iit], 20));

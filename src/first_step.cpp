@@ -28,18 +28,28 @@ void propagate(const cplx* in, cplx* out, int n, const std::vector<int>& active,
   }
 }
 
-void lens(const cplx* in, cplx* out, int n, const std::vector<int>& active, const Band& b, const RadialGrid& g) {
+// Gaussian beam of radius a00 at the lens, mapped to the distance zsic by the lens transform
+// (NPI input of the Fortran FirstStep). The point r1 (in a0) comes from the point r (in cm) at the lens.
+void npi_input(const std::vector<cplx>& O, cplx* out, int n, const std::vector<int>& active, const Band& b,
+               const RadialGrid& g) {
   const int nA = static_cast<int>(active.size());
   const int nq = b.nq();
-  const double foc_ph = .5 * (c::a0 * c::a0) / (c::focus * c::t0 * c::cL);
 #pragma omp parallel for schedule(static)
   for (int i = 0; i < n; ++i) {
-    const double r = g.r1[i];
-    const double g8 = std::exp(-pow8(r * c::a0));
+    const double r1 = g.r1[i];
+    const double fpr = std::sqrt(c::focus * c::focus + (c::a0 * c::a0) * (r1 * r1));
+    const double r = 2. * c::focus / r1 / c::a0 * (fpr - c::focus);
+    const double alfa1 = std::atan(r / 2. / c::focus);
+    const double cos2 = std::cos(2. * alfa1);
+    const double delta = (1. + 1. / cos2) * (r * r) / 4. / c::focus;
+    const double gauss = std::exp(-(.5 * (r * r)) / (c::a00 * c::a00));
+    const double jac = r / r1 / c::a0;
+    const double sfoc = std::sqrt(c::focus / fpr);
+    const double scos = std::sqrt(cos2);
     for (int a = 0; a < nA; ++a) {
-      const double th = foc_ph * (r * r) * b.freqs[nq + active[a]];
-      const std::size_t idx = static_cast<std::size_t>(i) * nA + a;
-      out[idx] = cmul(in[idx] * g8, cplx(std::cos(th), std::sin(th)));
+      const double th = b.freqs[nq + active[a]] / c::t0 / c::cL * delta;
+      const cplx amp = O[active[a]] * gauss * jac * sfoc / scos;
+      out[static_cast<std::size_t>(i) * nA + a] = cmul(amp, cplx(std::cos(th), std::sin(th)));
     }
   }
 }
@@ -47,7 +57,7 @@ void lens(const cplx* in, cplx* out, int n, const std::vector<int>& active, cons
 }  // namespace
 
 void first_step(const TimeFreq& tf, const Band& bandO, const RadialGrid& g, const HankelMatrix& H, double vg,
-                double dz, double dz0, int nrKeep, cplx* eOut, const std::filesystem::path& outDir) {
+                double dz, int nrKeep, cplx* eOut, const std::filesystem::path& outDir) {
   const int nt = tf.ntO;
   const int nq = nt / 2;
   const int n = H.n;
@@ -92,18 +102,8 @@ void first_step(const TimeFreq& tf, const Band& bandO, const RadialGrid& g, cons
     const int ncols = 2 * nA;
     double* Xd = reinterpret_cast<double*>(X.data());
     double* Yd = reinterpret_cast<double*>(Y.data());
-    const double a00_16 = pow16(c::a00);
 
-    // SpOrigin = Origin(iit) * exp(-(r1*a0)**16/a00**16)
-#pragma omp parallel for schedule(static)
-    for (int i = 0; i < n; ++i) {
-      const double g16 = std::exp(-(pow16(g.r1[i] * c::a0) / a00_16));
-      for (int a = 0; a < nA; ++a) X[static_cast<std::size_t>(i) * nA + a] = O[active[a]] * g16;
-    }
-    hankel_dense(H, Xd, Yd, ncols);
-    propagate(Y.data(), X.data(), n, active, bandO, g, vg, dz0);
-    hankel_dense(H, Xd, Yd, ncols);
-    lens(Y.data(), X.data(), n, active, bandO, g);
+    npi_input(O, X.data(), n, active, bandO, g);
     hankel_dense(H, Xd, Yd, ncols);
     propagate(Y.data(), X.data(), n, active, bandO, g, vg, dz);
     hankel_dense(H, Xd, Yd, ncols);

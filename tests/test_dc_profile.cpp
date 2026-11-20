@@ -77,6 +77,13 @@ int main() {
       CHECK_CLOSE(dc_field_kV(z + 0.5 * period), -v, 1e-10);
     }
     for (const Point& p : kSine) CHECK(dc_field(ph, p.z_cm) == dc_field_kV(p.z_cm) * ph.DC_norm);
+  } else if constexpr (c::dc_profile == 4) {
+    // 10 kV/cm for 71 <= z < 76.1 cm (76.1 as a single-precision literal), 0 elsewhere.
+    for (double z : {0.0, 56.25, 70.0, 70.999999, 76.1, 76.2, 80.0, 100.0}) CHECK(dc_field_kV(z) == 0.0);
+    for (double z : {71.0, 71.5, 73.0, 75.0, 76.0, 76.0999}) CHECK(dc_field_kV(z) == 10.0);
+    CHECK(dc_field_kV(static_cast<double>(76.1f)) == 0.0);
+    CHECK(dc_field_kV(std::nextafter(static_cast<double>(76.1f), 0.0)) == 10.0);
+    for (double z : {56.25, 71.0, 76.0, 76.1}) CHECK(dc_field(ph, z) == dc_field_kV(z) * ph.DC_norm);
   } else {
     for (const Point& p : kWindow) CHECK_CLOSE(dc_field_kV(p.z_cm), p.kV, 1e-13 * std::max(1.0, std::fabs(p.kV)));
     CHECK(dc_field_kV(c::dc_z0) == 0.0);
