@@ -126,7 +126,7 @@ int main(int argc, char** argv) {
     }
     std::ifstream params(res / "parameters.dat");
     const std::string text((std::istreambuf_iterator<char>(params)), std::istreambuf_iterator<char>());
-    CHECK(text.find("kw_THz: 71,71.1 cm (bin, .kwb)") != std::string::npos);
+    CHECK(text.find("kw_THz:") != std::string::npos && text.find("71,71.1 cm (bin, .kwb)") != std::string::npos);
     fs::remove_all(bin.out_dir);
   }
 

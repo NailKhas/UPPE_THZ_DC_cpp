@@ -72,8 +72,9 @@ int main() {
     CHECK(e2);
     // The text angle asin(kr/freqs*cL*t0/a0) is asin(kr_cm/k_cm) of the binary axes.
     if (axes) {
-      const double s = gT.kr[3] / bandT.freqs[nqT + 100] * c::cL * c::t0 / c::a0;
-      CHECK_CLOSE(d.kr_cm[3] / d.k_cm[99], s, 1e-14 * std::fabs(s));
+      const int q = nqT / 2;
+      const double s = gT.kr[3] / bandT.freqs[nqT + q] * c::cL * c::t0 / c::a0;
+      CHECK_CLOSE(d.kr_cm[3] / d.k_cm[q - 1], s, 1e-14 * std::fabs(s));
     }
 
     // Text: the rows of the Fortran kw_THz file, radial nodes outer, frequencies inner.
