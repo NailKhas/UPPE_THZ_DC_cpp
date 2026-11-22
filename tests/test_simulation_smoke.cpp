@@ -8,6 +8,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -61,11 +62,7 @@ std::vector<int> snapshot_positions(const fs::path& dir) {
   return v;
 }
 
-}  // namespace
-
-int main(int argc, char** argv) {
-  test::init();
-
+RunConfig smoke_config(const fs::path& data, const fs::path& out) {
   RunConfig cfg;
   cfg.sizes.nt_all = 131072;
   cfg.sizes.nR_first = 200;
@@ -74,16 +71,63 @@ int main(int argc, char** argv) {
   // Past the end of the optical stage (71 cm) and the first THz-stage snapshot.
   cfg.z_max_cm = c::opt_stage_end + 0.2;
   cfg.max_steps = 100000;
-  cfg.data_dir = argc > 1 ? fs::path(argv[1]) : fs::path("data");
-  cfg.out_dir = fs::temp_directory_path() / "uppe_test_smoke";
+  cfg.data_dir = data;
+  cfg.out_dir = out;
   fs::remove_all(cfg.out_dir);
   fs::create_directories(cfg.out_dir);
+  return cfg;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+  test::init();
+  const fs::path data = argc > 1 ? fs::path(argv[1]) : fs::path("data");
+
+  // kw_THz at its own points in the binary format. 71.0 cm falls on the first THz-stage step.
+  RunConfig bin = smoke_config(data, fs::temp_directory_path() / "uppe_test_smoke_kwb");
+  bin.kw_z_cm = {c::opt_stage_end, c::opt_stage_end + 0.1};
+  bin.kw_format = KwFormat::Binary;
+  // kw_THz as text with every THz-stage snapshot, as the Fortran code does.
+  RunConfig cfg = smoke_config(data, fs::temp_directory_path() / "uppe_test_smoke");
+  cfg.kw_format = KwFormat::Text;
 
   try {
+    CHECK(run_simulation(bin) == RunStatus::Finished);
     CHECK(run_simulation(cfg) == RunStatus::Finished);
   } catch (const std::exception& e) {
     std::fprintf(stderr, "run_simulation failed: %s\n", e.what());
     return 1;
+  }
+
+  {
+    const fs::path res = bin.out_dir / "res";
+    const int nKw = count_files(res / "kw_THz");
+    CHECK(nKw >= 1 && nKw <= 2);
+    for (int zp : snapshot_positions(res / "kw_THz")) CHECK(zp >= 100 * c::opt_stage_end);
+    CHECK(count_files(res / "IS") == static_cast<int>(read_table(res / "snapshots.txt").size()));
+    const TimeFreq tf = make_time_freq(bin.sizes.nt_all);
+    const std::uintmax_t nr = bin.sizes.nR_THz - 1, nf = tf.nqT - 1;
+    for (const auto& e : fs::directory_iterator(res / "kw_THz")) {
+      CHECK(e.path().extension() == ".kwb");
+      CHECK(fs::file_size(e.path()) == 48 + 8 * (2 * nf + nr) + 4 * nr * nf);
+      try {
+        const KwData d = read_kw_binary(e.path());
+        CHECK(d.nr == static_cast<int>(nr) && d.nf == static_cast<int>(nf));
+        CHECK(d.z_cm >= c::opt_stage_end && d.z_cm < bin.z_max_cm);
+        CHECK(static_cast<int>(d.z_cm * 1e2) == std::atoi(e.path().filename().string().c_str() + 1));
+        bool finite = true;
+        for (float v : d.e2) finite = finite && std::isfinite(v) && v >= 0.0f;
+        CHECK(finite);
+      } catch (const std::exception& ex) {
+        std::fprintf(stderr, "read_kw_binary failed: %s\n", ex.what());
+        CHECK(false);
+      }
+    }
+    std::ifstream params(res / "parameters.dat");
+    const std::string text((std::istreambuf_iterator<char>(params)), std::istreambuf_iterator<char>());
+    CHECK(text.find("kw_THz: 71,71.1 cm (bin, .kwb)") != std::string::npos);
+    fs::remove_all(bin.out_dir);
   }
 
   const fs::path res = cfg.out_dir / "res";

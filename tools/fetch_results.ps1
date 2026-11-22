@@ -8,7 +8,9 @@
   res/{IS,Fl,Or,Ne,IO}/Z*.dat, res/Imax.dat, ..., SpSIC.dat, Incident.dat, log_segNN.txt.
   What was already unpacked is remembered in <Dest>/.downloaded.json, so the script can be stopped
   and started again at any time. It exits once the release contains DONE.txt.
-  kw_THz is not in the release: it is in the artifacts kw-<Tag>-segNN of every segment run.
+  Binary kw_THz files come as kw_Z<pos>.tar.gz and unpack to res/kw_THz/Z<pos>.kwb
+  (convert with tools\kw_spectrum.py). Text kw_THz (--kw-format text) is not in the release: it is
+  in the artifacts kw-<Tag>-segNN of every segment run, which also keep the .kwb files.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File tools\fetch_results.ps1 -Tag z30-old

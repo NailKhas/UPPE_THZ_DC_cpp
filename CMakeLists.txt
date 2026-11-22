@@ -58,6 +58,7 @@ add_library(uppe_core STATIC
   src/first_step.cpp
   src/grids.cpp
   src/hankel.cpp
+  src/kw_output.cpp
   src/nonlinear.cpp
   src/output.cpp
   src/physics.cpp

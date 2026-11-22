@@ -69,7 +69,8 @@ void load_ionization_tables(Physics& ph, const std::filesystem::path& dir) {
 }
 
 void write_params(const Physics& ph, double ng, double d2kdw2, int nthreads, const Sizes& sizes,
-                  const TimeFreq& tf, const std::filesystem::path& outDir) {
+                  const TimeFreq& tf, const std::filesystem::path& outDir, const std::vector<double>& kw_z_cm,
+                  KwFormat kw_format) {
   TextWriter f(outDir / "res" / "parameters.dat");
   auto file_line = [&](const char* s) { f.text(s).nl(); };
   auto both = [&](const char* label, double v, const char* unit) {
@@ -125,6 +126,17 @@ void write_params(const Physics& ph, double ng, double d2kdw2, int nthreads, con
   std::printf(" Memory: %.9g\n", static_cast<double>(memory));
   f.text("Paralleling by ").i(nthreads).nl();
   f.text("Memory:").f(memory).nl();
+
+  std::string kw = kw_z_cm.empty() ? std::string("every THz snapshot") : std::string();
+  for (std::size_t k = 0; k < kw_z_cm.size(); ++k) {
+    char v[32];
+    std::snprintf(v, sizeof v, "%s%g", k ? "," : "", kw_z_cm[k]);
+    kw += v;
+    if (k + 1 == kw_z_cm.size()) kw += " cm";
+  }
+  kw += kw_format == KwFormat::Binary ? " (bin, .kwb)" : " (text, .dat)";
+  std::printf(" kw_THz: %s\n", kw.c_str());
+  f.text("kw_THz: ").text(kw.c_str()).nl();
 }
 
 }  // namespace uppe

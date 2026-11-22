@@ -15,7 +15,7 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr char kMagic[8] = {'U', 'P', 'P', 'E', 'C', 'K', 'P', 'T'};
-constexpr std::int32_t kVersion = 5;
+constexpr std::int32_t kVersion = 6;
 constexpr std::uint64_t kHashSeed = 0xcbf29ce484222325ULL;
 
 struct Header {
@@ -23,11 +23,12 @@ struct Header {
   std::int32_t version;
   std::int32_t nt_all, nR_first, nR_opt, nR_THz;
   std::int32_t dc_profile;
-  std::int32_t stage, reserved;
+  std::int32_t stage, kw_next;
   std::int64_t iz, clamped_total;
   double z, z_flag, Imax;
   std::uint64_t nO, nT;
   double focus, zsic;
+  std::uint64_t kw_hash;
 };
 
 // FNV-1a over 64-bit words: only detects truncated or damaged files.
@@ -100,6 +101,8 @@ void write_checkpoint(const fs::path& file, const Sizes& sizes, const LoopState&
   h.nT = E_T.size();
   h.focus = c::focus;
   h.zsic = c::zsic;
+  h.kw_next = state.kw_next;
+  h.kw_hash = state.kw_hash;
 
   const std::size_t bytesO = E_O.size() * sizeof(cplx);
   const std::size_t bytesT = E_T.size() * sizeof(cplx);
@@ -140,6 +143,7 @@ LoopState read_checkpoint(const fs::path& file, const Sizes& sizes, AlignedArray
                              std::to_string(c::dc_profile) +
                              " (UPPE_DC_PROFILE: 0 = CONST, 1 = SIGMOID_WINDOW, 2 = SUPERGAUSS, 3 = SINE, 4 = WINDOW)");
   if (h.stage != 0 && h.stage != 1) throw std::runtime_error("checkpoint " + name + " has a bad stage field");
+  if (h.kw_next < 0) throw std::runtime_error("checkpoint " + name + " has a bad kw_THz index");
 
   const std::size_t bytesO = E_O.size() * sizeof(cplx);
   const std::size_t bytesT = E_T.size() * sizeof(cplx);
@@ -161,6 +165,8 @@ LoopState read_checkpoint(const fs::path& file, const Sizes& sizes, AlignedArray
   s.z_flag = h.z_flag;
   s.Imax = h.Imax;
   s.stage = h.stage;
+  s.kw_next = h.kw_next;
+  s.kw_hash = h.kw_hash;
   return s;
 }
 

@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "constants.hpp"
+#include "kw_output.hpp"
 
 namespace uppe {
 
@@ -27,8 +28,9 @@ double dc_field_kV(double z_cm);
 // The same field in units where I0*E^2 is the intensity (DC_Field of the Fortran code).
 inline double dc_field(const Physics& ph, double z_cm) { return dc_field_kV(z_cm) * ph.DC_norm; }
 
-// write_params: console summary plus res/parameters.dat.
+// write_params: console summary plus res/parameters.dat (kw_z_cm/kw_format: the kw_THz schedule of RunConfig).
 void write_params(const Physics& ph, double ng, double d2kdw2, int nthreads, const Sizes& sizes,
-                  const TimeFreq& tf, const std::filesystem::path& outDir);
+                  const TimeFreq& tf, const std::filesystem::path& outDir, const std::vector<double>& kw_z_cm = {},
+                  KwFormat kw_format = KwFormat::Binary);
 
 }  // namespace uppe

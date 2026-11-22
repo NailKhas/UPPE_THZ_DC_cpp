@@ -50,9 +50,22 @@ RunConfig base_config(const fs::path& data, const fs::path& out) {
   cfg.sizes.nR_THz = 60;
   cfg.data_dir = data;
   cfg.out_dir = out;
+  // The 71.0 cm file is written after the first resume, the 71.1 cm file after the second one.
+  cfg.kw_z_cm = {c::opt_stage_end, c::opt_stage_end + 0.1};
+  cfg.kw_format = KwFormat::Binary;
   fs::remove_all(out);
   fs::create_directories(out);
   return cfg;
+}
+
+// run_simulation throws before the first step.
+bool run_throws(const RunConfig& cfg) {
+  try {
+    run_simulation(cfg);
+  } catch (const std::exception&) {
+    return true;
+  }
+  return false;
 }
 
 bool throws_on_read(const fs::path& file, const Sizes& sizes) {
@@ -143,6 +156,9 @@ int main(int argc, char** argv) {
   const auto filesR = list_files(dirR);
   const auto filesB = list_files(dirB);
   CHECK(filesR == filesB);
+  int kwFiles = 0;
+  for (const auto& name : filesR) kwFiles += name.rfind("res/kw_THz/", 0) == 0;
+  CHECK(kwFiles == 2);
   for (const auto& name : filesR) {
     if (!filesB.count(name)) continue;
     const bool same = read_file(dirR / name) == read_file(dirB / name);
@@ -174,6 +190,26 @@ int main(int argc, char** argv) {
   Sizes other = sizes;
   other.nR_THz = 64;
   CHECK(throws_on_read(ckA, other));
+
+  // A resume with other kw_THz points or another format is rejected, and so is a bad list.
+  {
+    RunConfig list = base_config(data, root / "other_kw");
+    list.resume_path = ckA;
+    list.max_steps = 0;
+    list.kw_z_cm = {c::opt_stage_end, c::opt_stage_end + 0.2};
+    CHECK(run_throws(list));
+    RunConfig format = list;
+    format.kw_z_cm = base_config(data, root / "other_kw").kw_z_cm;
+    format.kw_format = KwFormat::Text;
+    CHECK(run_throws(format));
+    RunConfig descending = base_config(data, root / "other_kw");
+    descending.max_steps = 1;
+    descending.kw_z_cm = {c::opt_stage_end + 0.1, c::opt_stage_end};
+    CHECK(run_throws(descending));
+    RunConfig early = descending;
+    early.kw_z_cm = {c::opt_stage_end - 1.0};
+    CHECK(run_throws(early));
+  }
 
   fs::remove_all(root);
   return test::finish("test_checkpoint");

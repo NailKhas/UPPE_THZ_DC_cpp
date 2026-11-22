@@ -6,6 +6,7 @@ set(UPPE_TESTS
   test_nonlinear
   test_dc_profile
   test_first_step
+  test_kw_output
   test_simulation_smoke
   test_checkpoint
 )
@@ -23,6 +24,7 @@ add_test(NAME propagation COMMAND test_propagation)
 add_test(NAME nonlinear COMMAND test_nonlinear)
 add_test(NAME dc_profile COMMAND test_dc_profile)
 add_test(NAME first_step COMMAND test_first_step)
+add_test(NAME kw_output COMMAND test_kw_output)
 # The data directory is passed relative to the working directory, so non-ASCII
 # source paths never go through the command line.
 add_test(NAME simulation_smoke COMMAND test_simulation_smoke data WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})

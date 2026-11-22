@@ -4,15 +4,26 @@ run-name: "Simulate ${{ inputs.tag }}, segment ${{ inputs.segment }} (focus ${{ 
 
 # One run is one segment of a chain. A segment stops itself before the job time limit or when the disk
 # is nearly full, saves a checkpoint as an artifact and dispatches the next segment, which resumes from it.
-# Small result files are streamed to the release sim-<tag> while the segment runs; kw_THz goes to the
-# artifact kw-<tag>-segNN.
+# Small result files and the binary kw_THz files (kw_Z<pos>.tar.gz) are streamed to the release sim-<tag>
+# while the segment runs; all of res/kw_THz also goes to the artifact kw-<tag>-segNN.
 on:
   workflow_dispatch:
     inputs:
       z_max:
         description: "Stop distance --z-max, cm (none = no limit, the chain ends at max_segments)"
         required: true
-        default: "85"
+        default: "85.5"
+      kw_z:
+        description: "kw_THz points --kw-z, cm, comma-separated, ascending, >= 71 (all = with every THz snapshot)"
+        required: true
+        default: "77,80,85"
+      kw_format:
+        description: "kw_THz format: bin (Z<pos>.kwb, ~250 MB, streamed to the release) or text (Z<pos>.dat, ~2 GB)"
+        type: choice
+        options:
+          - bin
+          - text
+        default: bin
       focus:
         description: "Focal distance, cm (compiled in; pinned for the whole chain)"
         required: true
@@ -80,6 +91,8 @@ jobs:
       SEGMENT: ${{ inputs.segment }}
       RESUME_RUN_ID: ${{ inputs.resume_run_id }}
       Z_MAX: ${{ inputs.z_max }}
+      KW_Z: ${{ inputs.kw_z }}
+      KW_FORMAT: ${{ inputs.kw_format }}
       FOCUS: ${{ inputs.focus }}
       ZSIC: ${{ inputs.zsic }}
       DC_PROFILE: ${{ inputs.dc_profile }}
@@ -105,6 +118,9 @@ jobs:
           fi
           num='^[0-9]+(\.[0-9]+)?$'
           [ "$Z_MAX" = none ] || [[ "$Z_MAX" =~ $num ]] || { echo "::error::bad z_max '$Z_MAX'"; exit 1; }
+          list='^[0-9]+(\.[0-9]+)?(,[0-9]+(\.[0-9]+)?)*$'
+          [ "$KW_Z" = all ] || [[ "$KW_Z" =~ $list ]] || { echo "::error::bad kw_z '$KW_Z' (e.g. 77,80,85 or all)"; exit 1; }
+          [[ "$KW_FORMAT" = bin || "$KW_FORMAT" = text ]] || { echo "::error::bad kw_format '$KW_FORMAT'"; exit 1; }
           [[ "$FOCUS" =~ $num ]] || { echo "::error::bad focus '$FOCUS'"; exit 1; }
           [[ "$ZSIC" =~ $num ]] || { echo "::error::bad zsic '$ZSIC'"; exit 1; }
           awk -v a="$ZSIC" -v b="$FOCUS" 'BEGIN { exit !(a < b) }' || { echo "::error::zsic must be less than focus"; exit 1; }
@@ -149,7 +165,7 @@ jobs:
             fi
             gh release create "$RELEASE" --prerelease --target "$CODE_SHA" \
               --title "Simulation $TAG (focus $FOCUS cm, zsic $ZSIC cm, z_max $Z_MAX, DC $DC_PROFILE)" \
-              --notes "Commit $CODE_SHA. Small result files are streamed here; kw_THz is in the artifacts kw-$TAG-segNN of every segment run."
+              --notes "Commit $CODE_SHA. kw_THz at $KW_Z ($KW_FORMAT). Small result files and binary kw_THz (kw_Z*.tar.gz) are streamed here; all of kw_THz is also in the artifacts kw-$TAG-segNN of every segment run."
           else
             prev=$(printf '%02d' $((SEGMENT - 1)))
             gh run download "$RESUME_RUN_ID" -n "ckpt-$TAG-seg$prev" -D run
@@ -169,6 +185,8 @@ jobs:
           if [ "$SEGMENT" -gt 1 ]; then resume=(--resume run/checkpoint.bin); fi
           zmax=()
           if [ "$Z_MAX" != none ]; then zmax=(--z-max "$Z_MAX"); fi
+          kw=(--kw-format "$KW_FORMAT")
+          if [ "$KW_Z" != all ]; then kw+=(--kw-z "$KW_Z"); fi
           log="run/log_seg$SEG2.txt"
 
           bash ci/stream_results.sh run "$SEG2" 600 > stream.log 2>&1 &
@@ -177,7 +195,7 @@ jobs:
           set +e
           timeout --preserve-status --signal=TERM --kill-after=5m "$((limit + 10))m" \
             ./build/fftw-openblas/uppe_thz_dc --data-dir data --out-dir run "${zmax[@]}" --threads "$(nproc)" \
-            --wall-limit-min "$limit" --min-free-gb "$MIN_FREE_GB" --checkpoint run/checkpoint.bin "${resume[@]}" \
+            --wall-limit-min "$limit" --min-free-gb "$MIN_FREE_GB" --checkpoint run/checkpoint.bin "${resume[@]}" "${kw[@]}" \
             2>&1 | tee "$log"
           code=${PIPESTATUS[0]}
           set -e
@@ -193,7 +211,7 @@ jobs:
       - name: Pack kw_THz
         if: always()
         run: |
-          if compgen -G "run/res/kw_THz/*.dat" > /dev/null; then
+          if compgen -G "run/res/kw_THz/Z*" > /dev/null; then
             extra=()
             [ -f "run/log_seg$SEG2.txt" ] && extra=("log_seg$SEG2.txt")
             # Packed files are deleted as they go, so a nearly full disk still has room for the archive.
@@ -235,7 +253,7 @@ jobs:
             exit 0
           fi
           gh workflow run simulate.yml --ref "$GITHUB_REF_NAME" \
-            -f z_max="$Z_MAX" -f focus="$FOCUS" -f zsic="$ZSIC" -f dc_profile="$DC_PROFILE" -f tag="$TAG" -f segment="$next" -f resume_run_id="$GITHUB_RUN_ID" \
+            -f z_max="$Z_MAX" -f kw_z="$KW_Z" -f kw_format="$KW_FORMAT" -f focus="$FOCUS" -f zsic="$ZSIC" -f dc_profile="$DC_PROFILE" -f tag="$TAG" -f segment="$next" -f resume_run_id="$GITHUB_RUN_ID" \
             -f code_sha="$CODE_SHA" -f budget_minutes="$BUDGET" -f max_segments="$MAX_SEGMENTS" -f run_tests="$RUN_TESTS"
           echo "Dispatched segment $next"
 

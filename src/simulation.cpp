@@ -36,28 +36,42 @@ void create_output_dirs(const fs::path& out) {
   for (const char* d : {"IS", "Fl", "kw_THz", "Or", "Ne", "IO"}) fs::create_directories(out / "res" / d);
 }
 
+void validate_kw(const RunConfig& cfg) {
+  const std::vector<double>& z = cfg.kw_z_cm;
+  for (std::size_t k = 0; k < z.size(); ++k) {
+    if (!(z[k] >= c::opt_stage_end))
+      throw std::invalid_argument("kw_THz points must be >= " + std::to_string(c::opt_stage_end) +
+                                  " cm (no THz field before the THz stage)");
+    if (k > 0 && !(z[k] > z[k - 1])) throw std::invalid_argument("kw_THz points must be strictly ascending");
+  }
+}
+
+// kw_THz file name of the step at z_pos (= int(z*k0a0a0*1e2), as the snapshots).
+fs::path kw_file(const fs::path& out, int z_pos, KwFormat format) {
+  char name[32];
+  std::snprintf(name, sizeof name, "Z%04d%s", z_pos, kw_extension(format));
+  return out / "res" / "kw_THz" / name;
+}
+
 struct Snapshot {
-  TextWriter is, fl, kw_thz, orr, ne, io;
+  TextWriter is, fl, orr, ne, io;
 
   void close() {
     is.close();
     fl.close();
-    kw_thz.close();
     orr.close();
     ne.close();
     io.close();
   }
 };
 
-// The optical stage writes no kw_THz file (withKw = false).
-std::unique_ptr<Snapshot> open_snapshot(const fs::path& out, int z_pos, bool withKw) {
+std::unique_ptr<Snapshot> open_snapshot(const fs::path& out, int z_pos) {
   char name[32];
   std::snprintf(name, sizeof name, "Z%04d.dat", z_pos);
   const fs::path res = out / "res";
   auto s = std::make_unique<Snapshot>();
   s->is = TextWriter(res / "IS" / name);
   s->fl = TextWriter(res / "Fl" / name);
-  if (withKw) s->kw_thz = TextWriter(res / "kw_THz" / name);
   s->orr = TextWriter(res / "Or" / name);
   s->ne = TextWriter(res / "Ne" / name);
   s->io = TextWriter(res / "IO" / name);
@@ -128,6 +142,8 @@ RunStatus run_simulation(const RunConfig& cfg) {
   const Sizes& sz = cfg.sizes;
   const TimeFreq tf = make_time_freq(sz.nt_all);
   validate(sz, tf);
+  validate_kw(cfg);
+  const std::uint64_t kw_hash = kw_schedule_hash(cfg.kw_z_cm, cfg.kw_format);
   const int nthreads = max_threads();
   const fs::path& out = cfg.out_dir;
   create_output_dirs(out);
@@ -138,7 +154,7 @@ RunStatus run_simulation(const RunConfig& cfg) {
   Physics ph = make_physics();
   load_ionization_tables(ph, cfg.data_dir);
   // PARALLEL.f90 calls write_params before PrepareKZ_opt, so ng = 0 and Ldisp = Infinity are reported.
-  if (!resume) write_params(ph, 0.0, 0.0, nthreads, sz, tf, out);
+  if (!resume) write_params(ph, 0.0, 0.0, nthreads, sz, tf, out, cfg.kw_z_cm, cfg.kw_format);
 
   const int ntO = tf.ntO;
   const int nqO = tf.nqO;
@@ -171,6 +187,7 @@ RunStatus run_simulation(const RunConfig& cfg) {
   double Imax = 0.0;
   long long iz = 0;
   long long clamped_total = 0;
+  std::size_t kw_next = 0;  // index of the next kw_THz target in cfg.kw_z_cm
   if (resume) {
     const LoopState st = read_checkpoint(cfg.resume_path, sz, E_O, E_T);
     iz = st.iz;
@@ -181,6 +198,12 @@ RunStatus run_simulation(const RunConfig& cfg) {
     if (st.stage != (z < z_opt_end ? 0 : 1))
       throw std::runtime_error("checkpoint " + path_string(cfg.resume_path) + ": stage " + std::to_string(st.stage) +
                                " does not match z = " + std::to_string(z * c::Ldifr) + " cm");
+    if (st.kw_hash != kw_hash)
+      throw std::runtime_error("checkpoint " + path_string(cfg.resume_path) +
+                               " was written with other kw_THz points or format (--kw-z, --kw-format)");
+    if (st.kw_next < 0 || static_cast<std::size_t>(st.kw_next) > cfg.kw_z_cm.size())
+      throw std::runtime_error("checkpoint " + path_string(cfg.resume_path) + " has a bad kw_THz index");
+    kw_next = static_cast<std::size_t>(st.kw_next);
     std::printf(" --- Resumed from %s at step %lld, z = %.15g cm (%s stage) ---\n",
                 path_string(cfg.resume_path).c_str(), iz, z * c::Ldifr, st.stage == 0 ? "optical" : "THz");
     std::fflush(stdout);
@@ -393,7 +416,7 @@ RunStatus run_simulation(const RunConfig& cfg) {
     if (z >= z_flag) {
       z_flag = z_flag + (z < c::snap_dense_begin / k0a0a0 ? c::snap_sparse : c::snap_opt_dense) / k0a0a0;
       z_pos = static_cast<int>(z * k0a0a0 * 1e2);
-      snap = open_snapshot(out, z_pos, false);
+      snap = open_snapshot(out, z_pos);
       // No THz field yet: its rows of IS and IO are zeros.
       for (int q = 1; q < nqT; ++q) {
         const float fr = bandT.fr[nqT + q];
@@ -444,16 +467,21 @@ RunStatus run_simulation(const RunConfig& cfg) {
         z_flag = z_flag + c::snap_dense / k0a0a0;
       }
       z_pos = static_cast<int>(z * k0a0a0 * 1e2);
-      snap = open_snapshot(out, z_pos, true);
-      write_rows_parallel(snap->kw_thz, nrT, [&](int i, LineBuffer& b) {
-        const cplx* row = E_T.data() + static_cast<std::size_t>(i) * nqT;
-        const double kr = gT.kr[i];
-        for (int q = 1; q < nqT; ++q) {
-          const int itt = nqT + q;
-          const float angle = static_cast<float>(std::asin(kr / bandT.freqs[itt] * c::cL * c::t0 / c::a0));
-          b.f(bandT.fr[itt]).f(angle).d(abs2(row[q])).nl();
-        }
-      });
+      snap = open_snapshot(out, z_pos);
+    }
+    // kw_THz: with every snapshot, or once per target of cfg.kw_z_cm (several targets passed in one step
+    // give one file).
+    bool kw_due = cfg.kw_z_cm.empty() ? static_cast<bool>(snap) : false;
+    while (kw_next < cfg.kw_z_cm.size() && z * k0a0a0 >= cfg.kw_z_cm[kw_next]) {
+      kw_due = true;
+      ++kw_next;
+    }
+    if (kw_due) {
+      const int kw_pos = static_cast<int>(z * k0a0a0 * 1e2);
+      if (cfg.kw_format == KwFormat::Binary)
+        write_kw_binary(kw_file(out, kw_pos, cfg.kw_format), E_T.data(), nrT, nqT, gT, bandT, z * k0a0a0);
+      else
+        write_kw_text(kw_file(out, kw_pos, cfg.kw_format), E_T.data(), nrT, nqT, gT, bandT);
     }
     const bool fluence = static_cast<bool>(snap);
 
@@ -511,6 +539,8 @@ RunStatus run_simulation(const RunConfig& cfg) {
     st.z_flag = z_flag;
     st.Imax = Imax;
     st.stage = z < z_opt_end ? 0 : 1;
+    st.kw_next = static_cast<int>(kw_next);
+    st.kw_hash = kw_hash;
     write_checkpoint(cfg.checkpoint_path, sz, st, E_O, E_T);
     std::printf(" Checkpoint written to %s at step %lld, z = %.15g cm\n", path_string(cfg.checkpoint_path).c_str(),
                 iz, z * c::Ldifr);

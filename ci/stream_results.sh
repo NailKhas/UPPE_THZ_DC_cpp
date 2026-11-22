@@ -3,7 +3,9 @@
 #   grids.tar.gz               SpSIC.dat, Incident.dat and the grid files of res/ (segment 01 only)
 #   segNN_Zaaaa-Zbbbb.tar.gz   res/{IS,Fl,Or,Ne,IO} of the snapshots completed since the last pass
 #   latest_segNN.tar.gz        res/Imax.dat, Nemax.dat, Energy.dat, Den.dat, snapshots of this segment, log_segNN.txt
-# kw_THz is not streamed. A snapshot is complete once its number is listed in res/snapshots.txt.
+#   kw_Zaaaa.tar.gz            res/kw_THz/Zaaaa.kwb (binary kw_THz, ~250 MB each)
+# Text kw_THz (Z*.dat) is not streamed. A snapshot is complete once its number is listed in res/snapshots.txt;
+# a .kwb file is complete once it has its final name (it is written as .kwb.tmp and renamed).
 # Runs a pass every <interval> seconds; when <out>/.stream_stop appears it makes a final pass and exits.
 # Usage: stream_results.sh <out dir> <segment, two digits> [interval s]
 set -u
@@ -79,9 +81,25 @@ stream_latest() {
   rm -rf "$stage" "$work/latest_seg$seg.tar.gz"
 }
 
+stream_kw() {
+  local f b name
+  for f in "$out"/res/kw_THz/Z*.kwb; do
+    [ -f "$f" ] || continue
+    b=$(basename "$f" .kwb)
+    grep -qx "kw_$b" "$state" && continue
+    name="kw_$b.tar.gz"
+    if tar -czf "$work/$name" -C "$out" "res/kw_THz/$b.kwb" && upload "$work/$name"; then
+      echo "kw_$b" >>"$state"
+      echo "streamed $name"
+    fi
+    rm -f "$work/$name"
+  done
+}
+
 pass() {
   stream_grids
   stream_snapshots
+  stream_kw
   stream_latest
 }
 

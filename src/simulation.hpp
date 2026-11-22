@@ -3,8 +3,10 @@
 #include <csignal>
 #include <filesystem>
 #include <optional>
+#include <vector>
 
 #include "constants.hpp"
+#include "kw_output.hpp"
 
 namespace uppe {
 
@@ -18,6 +20,10 @@ struct RunConfig {
   std::filesystem::path resume_path;      // continue from this checkpoint instead of FirstStep; empty = fresh run
   std::optional<double> wall_limit_s;     // stop early enough to stay within this wall time, s
   std::optional<double> min_free_bytes;   // stop once the free space on out_dir's disk drops below this
+  // res/kw_THz is written once per target, on the first THz-stage step with z >= target (strictly ascending,
+  // >= c::opt_stage_end); empty = with every THz-stage snapshot, as the Fortran code does.
+  std::vector<double> kw_z_cm;
+  KwFormat kw_format = KwFormat::Binary;
   const volatile std::sig_atomic_t* stop_flag = nullptr;  // nonzero = stop after the current step
 };
 

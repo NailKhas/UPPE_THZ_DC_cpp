@@ -5,6 +5,7 @@
 #include <exception>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "blas.hpp"
 #include "simulation.hpp"
@@ -34,8 +35,33 @@ void usage() {
       "  --wall-limit-min <m>  stop before the run exceeds m minutes of wall time\n"
       "  --min-free-gb <g>     stop once less than g GB (1e9 bytes) are free on the disk of --out-dir\n"
       "  --max-steps <n>       stop after n z steps in total\n"
+      "  --kw-z <a,b,...>      write res/kw_THz only at these z (cm, ascending, >= 71), once each, on the first step\n"
+      "                        with z >= the point (default: with every THz-stage snapshot)\n"
+      "  --kw-format bin|text  res/kw_THz format: bin = Z<pos>.kwb, float32 |E|^2 (default), text = Fortran-like Z<pos>.dat\n"
       "Exit code: 0 when --z-max is reached, %d when the run stopped early, 1 on error.\n",
       kExitContinue);
+}
+
+// Comma-separated numbers, e.g. "77,80,85".
+std::vector<double> parse_list(const std::string& s, const std::string& opt) {
+  std::vector<double> v;
+  std::size_t begin = 0;
+  while (true) {
+    const std::size_t end = s.find(',', begin);
+    const std::string tok = s.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+    std::size_t used = 0;
+    double x = 0.0;
+    try {
+      x = std::stod(tok, &used);
+    } catch (const std::exception&) {
+      used = 0;
+    }
+    if (tok.empty() || used != tok.size()) throw std::runtime_error(opt + ": bad number '" + tok + "'");
+    v.push_back(x);
+    if (end == std::string::npos) break;
+    begin = end + 1;
+  }
+  return v;
 }
 
 }  // namespace
@@ -73,6 +99,16 @@ int main(int argc, char** argv) {
         cfg.min_free_bytes = g * 1e9;
       } else if (opt == "--max-steps") {
         cfg.max_steps = std::stoll(value());
+      } else if (opt == "--kw-z") {
+        cfg.kw_z_cm = parse_list(value(), opt);
+      } else if (opt == "--kw-format") {
+        const std::string f = value();
+        if (f == "bin")
+          cfg.kw_format = uppe::KwFormat::Binary;
+        else if (f == "text")
+          cfg.kw_format = uppe::KwFormat::Text;
+        else
+          throw std::runtime_error("--kw-format must be bin or text");
       } else if (opt == "-h" || opt == "--help") {
         usage();
         return 0;

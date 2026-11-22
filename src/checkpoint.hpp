@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 
 #include "common.hpp"
@@ -16,6 +17,8 @@ struct LoopState {
   double z_flag = 0.0;
   double Imax = 0.0;
   int stage = 0;  // 0 = optical stage (z < c::opt_stage_end), 1 = THz stage
+  int kw_next = 0;              // index of the next kw_THz target in RunConfig::kw_z_cm
+  std::uint64_t kw_hash = 0;    // kw_schedule_hash of the kw_THz targets and format
 };
 
 // Binary dump of the loop state and both fields. The file is written as <file>.tmp and then
