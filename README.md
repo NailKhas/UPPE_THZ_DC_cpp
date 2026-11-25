@@ -326,8 +326,8 @@ gh workflow run simulate.yml --ref f75-fast -f tag=f75-kw -f segment=15 -f resum
 
 Workflow [`.github/workflows/bench.yml`](.github/workflows/bench.yml) собирает текущий код и базовый коммит
 `base_sha` на одной машине, продолжает обоими с одного чекпоинта цепочки (`ckpt_run_id`, `ckpt_name`) на `steps`
-шагов (по умолчанию 10) и сравнивает три запуска: A — базовый код, B — текущий с `--nl-eps 0` (только точные
-отсечки), C — текущий с `--nl-eps <nl_eps>`. [`tools/bench_compare.py`](tools/bench_compare.py) пишет в сводку
+шагов (по умолчанию 10) и сравнивает запуски: A — базовый код, B — текущий с `--nl-eps 0` (только точные
+отсечки), C1, C2, … — текущий с каждым `--nl-eps` из списка `nl_eps` (по умолчанию `1e-12,1e-9,1e-6`). [`tools/bench_compare.py`](tools/bench_compare.py) пишет в сводку
 запуска среднее и медиану `step time` без первого шага, ускорение относительно A, средние `phases` и диапазон
 `R_nl`, относительные отличия `E_O` и `E_T` из итоговых чекпоинтов (L2 и максимум) и столбцов `Imax.dat`,
 `Energy.dat`, `Nemax.dat`, `Den.dat`. `workflow_dispatch` работает, только когда файл есть в ветке по умолчанию;

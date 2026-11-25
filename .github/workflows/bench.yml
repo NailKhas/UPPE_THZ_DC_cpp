@@ -4,7 +4,8 @@ run-name: "Bench ${{ github.ref_name }} against ${{ inputs.base_sha || 'dd48277'
 
 # Step time and results of the current code against a base commit, without a full run: both resume from the
 # same checkpoint of a simulate.yml chain on one runner and make a few steps.
-#   A: base commit;  B: current code, --nl-eps 0 (exact spectral cuts only);  C: current code, --nl-eps <nl_eps>.
+#   A: base commit;  B: current code, --nl-eps 0 (exact spectral cuts only);  C1, C2, ...: current code with
+#   each --nl-eps of the list nl_eps.
 # tools/bench_compare.py puts the step and phase times and the differences of the fields and of the scalar
 # files from A into the job summary.
 # workflow_dispatch needs this file on the default branch; a pushed tag bench-* runs it from any commit
@@ -29,9 +30,9 @@ on:
         required: true
         default: "10"
       nl_eps:
-        description: "--nl-eps of run C"
+        description: "--nl-eps of the runs C, comma-separated"
         required: true
-        default: "1e-12"
+        default: "1e-12,1e-9,1e-6"
       kw_z:
         description: "--kw-z of the chain (the checkpoint stores its schedule)"
         required: true
@@ -70,7 +71,7 @@ jobs:
       CKPT_NAME: ${{ inputs.ckpt_name || 'ckpt-f75-kw-seg14' }}
       BASE_SHA: ${{ inputs.base_sha || 'dd48277ea031b315330244ef9bbdf276f32cec82' }}
       STEPS: ${{ inputs.steps || '10' }}
-      NL_EPS: ${{ inputs.nl_eps || '1e-12' }}
+      NL_EPS: ${{ inputs.nl_eps || '1e-12,1e-9,1e-6' }}
       KW_Z: ${{ inputs.kw_z || '77,80,85' }}
       Z_MAX: ${{ inputs.z_max || '85.5' }}
       FOCUS: ${{ inputs.focus || '75' }}
@@ -121,7 +122,7 @@ jobs:
           echo "Checkpoint at step $iz, runs stop at step $((iz + STEPS))"
           echo "STOP=$((iz + STEPS))" >> "$GITHUB_ENV"
 
-      - name: Run A, B, C
+      - name: Run A, B, C1, C2, ...
         run: |
           nproc
           free -h
@@ -142,13 +143,18 @@ jobs:
           }
           run runA base/build/fftw-openblas/uppe_thz_dc
           run runB build/fftw-openblas/uppe_thz_dc --nl-eps 0
-          run runC build/fftw-openblas/uppe_thz_dc --nl-eps "$NL_EPS"
+          IFS=, read -ra eps <<< "$NL_EPS"
+          for k in "${!eps[@]}"; do
+            run "runC$((k + 1))" build/fftw-openblas/uppe_thz_dc --nl-eps "${eps[k]}"
+          done
           df -h .
 
       - name: Compare
         run: |
-          python tools/bench_compare.py "A base ${BASE_SHA:0:7}=runA" "B nl-eps 0=runB" "C nl-eps $NL_EPS=runC" \
-            --out summary.md
+          IFS=, read -ra eps <<< "$NL_EPS"
+          runs=("A base ${BASE_SHA:0:7}=runA" "B nl-eps 0=runB")
+          for k in "${!eps[@]}"; do runs+=("C$((k + 1)) nl-eps ${eps[k]}=runC$((k + 1))"); done
+          python tools/bench_compare.py "${runs[@]}" --out summary.md
           {
             echo "## Bench: $GITHUB_SHA against $BASE_SHA, checkpoint $CKPT_NAME (run $CKPT_RUN_ID)"
             echo
