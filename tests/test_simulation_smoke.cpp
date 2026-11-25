@@ -11,6 +11,7 @@
 #include <iterator>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "check.hpp"
@@ -62,6 +63,12 @@ std::vector<int> snapshot_positions(const fs::path& dir) {
   return v;
 }
 
+// A file still held by another process (an antivirus scan) must not abort the test.
+void remove_dir(const fs::path& dir) {
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+}
+
 RunConfig smoke_config(const fs::path& data, const fs::path& out) {
   RunConfig cfg;
   cfg.sizes.nt_all = 131072;
@@ -73,7 +80,7 @@ RunConfig smoke_config(const fs::path& data, const fs::path& out) {
   cfg.max_steps = 100000;
   cfg.data_dir = data;
   cfg.out_dir = out;
-  fs::remove_all(cfg.out_dir);
+  remove_dir(cfg.out_dir);
   fs::create_directories(cfg.out_dir);
   return cfg;
 }
@@ -127,7 +134,7 @@ int main(int argc, char** argv) {
     std::ifstream params(res / "parameters.dat");
     const std::string text((std::istreambuf_iterator<char>(params)), std::istreambuf_iterator<char>());
     CHECK(text.find("kw_THz:") != std::string::npos && text.find("71,71.1 cm (bin, .kwb)") != std::string::npos);
-    fs::remove_all(bin.out_dir);
+    remove_dir(bin.out_dir);
   }
 
   const fs::path res = cfg.out_dir / "res";
@@ -204,6 +211,6 @@ int main(int argc, char** argv) {
   CHECK(fs::exists(cfg.out_dir / "SpSIC.dat"));
   CHECK(fs::exists(cfg.out_dir / "Incident.dat"));
 
-  fs::remove_all(cfg.out_dir);
+  remove_dir(cfg.out_dir);
   return test::finish("test_simulation_smoke");
 }

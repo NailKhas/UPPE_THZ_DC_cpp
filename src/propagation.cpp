@@ -11,7 +11,7 @@ void linear_step(cplx* E, const Propagator& P, const RadialGrid& g, const Band& 
     const double* kap = P.kappa.data() + static_cast<std::size_t>(i) * nq;
     const double kr = g.kr[i];
     for (int q = qStart; q < nq; ++q) {
-      if (i >= P.cut[q]) {
+      if (i >= P.hcut[q]) {
         row[q] = cplx(0.0, 0.0);
         continue;
       }
@@ -31,7 +31,7 @@ void kdivkz(cplx* K, const Propagator& P, const RadialGrid& g, const Band& b) {
     const double* kp = P.kplasma.data() + static_cast<std::size_t>(i) * nq;
     const double kr = g.kr[i];
     for (int q = 0; q < nq; ++q) {
-      if (i >= P.cut[q]) {
+      if (i >= P.hcut[q]) {
         row[q] = cplx(0.0, 0.0);
         continue;
       }

@@ -32,7 +32,7 @@ struct NonlinearInputs {
   const Physics* ph = nullptr;
   const cplx* thz_r = nullptr;  // THz field E_THz(w,r), [>= nr rows][nqT]; unused by nonlinear_response_opt
   const double* et = nullptr;   // optical field Et(t,r), [nr][ntO]
-  int nr = 0;                   // nR_opt - 1
+  int nr = 0;                   // rows computed, at most nR_opt - 1 (nonlinear_rows)
   double dz = 0.0;
   double dc = 0.0;              // external DC field at the z of this RK stage, dc_field(ph, z_cm)
   cplx* k_opt = nullptr;        // out: k(w,r), [nr][nqO]
@@ -47,5 +47,10 @@ long long nonlinear_response(const NonlinearInputs& in, NonlinearWorkspace& ws);
 // JefThread: the optical field alone on the ntO grid, only k(w,r) is computed.
 // Returns the number of clamped ionization-table lookups, as nonlinear_response.
 long long nonlinear_response_opt(const NonlinearInputs& in, NonlinearOptWorkspace& ws);
+
+// Number of radial rows the nonlinear response is computed on: the rows up to the last one with
+// maxsq[i] > eps*Imax, plus max(pad, last/4) rows, at least 1 and at most maxsq.size(); all rows for eps <= 0.
+// The level never exceeds 1e-3 of the ionization threshold I0*E^2 = 1e11 W/cm^2, so Ne = 0 in the rows left out.
+int nonlinear_rows(const std::vector<double>& maxsq, double Imax, double eps, double I0, int pad);
 
 }  // namespace uppe

@@ -1,5 +1,6 @@
 #include "grids.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -141,6 +142,26 @@ Propagator make_propagator(const Band& band, const RadialGrid& grid, double vg, 
     }
     p.cut[q] = cut;
     p.wfilter[q] = std::exp(-pow20(band.freqs[nq + q] / omega_max));
+  }
+
+  p.qmax = 0;
+  for (int q = nq - 1; q >= 0; --q) {
+    if (p.wfilter[q] != 0.0) {
+      p.qmax = q + 1;
+      break;
+    }
+  }
+  p.hcut.assign(nq, 0);
+#pragma omp parallel for schedule(dynamic, 64)
+  for (int q = 0; q < p.qmax; ++q) {
+    int prop = 0;
+    for (int i = nr - 1; i >= 0; --i) {
+      if (p.kplasma[static_cast<std::size_t>(i) * nq + q] != 0.0) {
+        prop = i + 1;
+        break;
+      }
+    }
+    p.hcut[q] = std::min(p.cut[q], prop);
   }
   return p;
 }

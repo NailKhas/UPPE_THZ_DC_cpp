@@ -24,6 +24,10 @@ struct RunConfig {
   // >= c::opt_stage_end); empty = with every THz-stage snapshot, as the Fortran code does.
   std::vector<double> kw_z_cm;
   KwFormat kw_format = KwFormat::Binary;
+  // The nonlinear response is computed on the rows r_i up to the last one with max_t E(t,r_i)^2 > nl_eps*Imax,
+  // plus max(nl_pad, a quarter) more rows (nonlinear_rows); 0 = on all rows.
+  double nl_eps = 1e-12;
+  int nl_pad = 64;
   const volatile std::sig_atomic_t* stop_flag = nullptr;  // nonzero = stop after the current step
 };
 

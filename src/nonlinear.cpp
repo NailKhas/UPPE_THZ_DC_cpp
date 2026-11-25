@@ -1,5 +1,6 @@
 #include "nonlinear.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace uppe {
@@ -231,6 +232,16 @@ long long nonlinear_response_opt(const NonlinearInputs& in, NonlinearOptWorkspac
   long long total = 0;
   for (long long v : clamped) total += v;
   return total;
+}
+
+int nonlinear_rows(const std::vector<double>& maxsq, double Imax, double eps, double I0, int pad) {
+  const int nr = static_cast<int>(maxsq.size());
+  if (!(eps > 0.0)) return nr;
+  const double level = std::min(eps * Imax, 1e8 / I0);
+  int last = 0;
+  for (int i = 0; i < nr; ++i)
+    if (maxsq[i] > level) last = i + 1;
+  return std::max(1, std::min(nr, last + std::max(pad, last / 4)));
 }
 
 }  // namespace uppe

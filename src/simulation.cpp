@@ -123,6 +123,23 @@ void row_stats(const double* Et, int nr, int nt, std::vector<double>& sumsq, std
   }
 }
 
+// Wall time of the parts of one z step, s.
+struct PhaseTimes {
+  double hnkT = 0.0;  // hankel_spectral with the THz matrix
+  double hnkO = 0.0;  // hankel_spectral with the optical matrix
+  double nl = 0.0;    // nonlinear_response, nonlinear_response_opt
+  double fft = 0.0;   // spectra_to_time
+  double lin = 0.0;   // linear_step, kdivkz, add_to
+  double io = 0.0;    // snapshots and kw_THz
+};
+
+template <class F>
+void timed(double& acc, F&& f) {
+  const double t = omp_get_wtime();
+  f();
+  acc += omp_get_wtime() - t;
+}
+
 void add_to(cplx* E, const cplx* K, std::size_t n) {
   const long long nn = static_cast<long long>(n);
   const int chunk = 1 << 16;
@@ -147,6 +164,7 @@ RunStatus run_simulation(const RunConfig& cfg) {
   const int nthreads = max_threads();
   const fs::path& out = cfg.out_dir;
   create_output_dirs(out);
+  std::printf(" Nonlinear response rows: nl_eps = %g, nl_pad = %d\n", cfg.nl_eps, cfg.nl_pad);
   // A resumed run continues the scalar files and does not rewrite what the first run already wrote.
   const bool resume = !cfg.resume_path.empty();
 
@@ -250,7 +268,7 @@ RunStatus run_simulation(const RunConfig& cfg) {
   if (!resume) write_band_files(out, bandT, PT, BandKind::THz);
 
   AlignedArray<cplx> K_T(nT);   // k_THz(w,kr)
-  AlignedArray<cplx> B_T(nT);   // Ebuf(w,r); rows >= nR_opt-1 are valid only on snapshot steps
+  AlignedArray<cplx> B_T(nT);   // Ebuf(w,r); rows >= R_nl are valid only in the first RK stage of snapshot steps
   AlignedArray<cplx> Kr_T(static_cast<std::size_t>(nrO) * nqT);  // k_THz(w,r) from JefThread
   AlignedArray<double> Et_O(static_cast<std::size_t>(nrO) * ntO);  // Et(t,r)
   std::vector<double> neMax(nrO, 0.0), Fl(nrO, 0.0), sumsq(nrO, 0.0), maxsq(nrO, 0.0), intSp;
@@ -275,48 +293,70 @@ RunStatus run_simulation(const RunConfig& cfg) {
     clamped_total += cnt;
   };
 
+  PhaseTimes pt;
+  // Rows of the nonlinear response (R_nl), set from the full optical diagnostics of each step: farther
+  // out the field is too weak for the response to matter, and k(w,r), k_THz(w,r) there are taken as 0.
+  int nrNl = nrO;
+  // Spectral rows that are zero in E(w,kr), E_THz(w,kr) and K(w,kr) are skipped by the Hankel transforms.
+  const int* hcO = PO.hcut.data();
+  const int* hcT = PT.hcut.data();
+
   // JefThread_THz; z_stage (in units of Ldifr) is where this RK stage samples the external field.
   auto run_nonlinear = [&](double step, double z_stage) {
     nl.dz = step;
     nl.dc = dc_field(ph, z_stage * c::Ldifr);
-    count_clamped(nonlinear_response(nl, nlws));
+    nl.nr = nrNl;
+    timed(pt.nl, [&] { count_clamped(nonlinear_response(nl, nlws)); });
   };
 
   // JefThread: the optical stage has no DC field (DC_Field = 0d0 before the loop in PARALLEL.f90).
   auto run_nonlinear_opt = [&](double step) {
     nl.dz = step;
     nl.dc = 0.0;
-    count_clamped(nonlinear_response_opt(nl, nlwsO));
+    nl.nr = nrNl;
+    timed(pt.nl, [&] { count_clamped(nonlinear_response_opt(nl, nlwsO)); });
   };
 
   // HnkThread(k), KdivKZ_opt
   auto to_kr_and_divide_opt = [&]() {
-    hankel_spectral(HO, HankelInput{Kr_O.data(), nullptr, 0.0, nrO}, K_O.data(), nrO, nqO, nullptr, nullptr);
-    kdivkz(K_O.data(), PO, gO, bandO);
+    timed(pt.hnkO, [&] {
+      hankel_spectral(HO, HankelInput{Kr_O.data(), nullptr, 0.0, nrNl}, K_O.data(), nrO, nqO, nullptr, hcO);
+    });
+    timed(pt.lin, [&] { kdivkz(K_O.data(), PO, gO, bandO); });
   };
 
   // HnkThread(k), HnkThread(k_THz), KdivKZ
   auto to_kr_and_divide = [&]() {
-    hankel_spectral(HO, HankelInput{Kr_O.data(), nullptr, 0.0, nrO}, K_O.data(), nrO, nqO, nullptr, nullptr);
-    hankel_spectral(HT, HankelInput{Kr_T.data(), nullptr, 0.0, nrO}, K_T.data(), nrT, nqT, nullptr, PT.cut.data());
-    kdivkz(K_T.data(), PT, gT, bandT);
-    kdivkz(K_O.data(), PO, gO, bandO);
+    timed(pt.hnkO, [&] {
+      hankel_spectral(HO, HankelInput{Kr_O.data(), nullptr, 0.0, nrNl}, K_O.data(), nrO, nqO, nullptr, hcO);
+    });
+    timed(pt.hnkT, [&] {
+      hankel_spectral(HT, HankelInput{Kr_T.data(), nullptr, 0.0, nrNl}, K_T.data(), nrT, nqT, nullptr, hcT);
+    });
+    timed(pt.lin, [&] {
+      kdivkz(K_T.data(), PT, gT, bandT);
+      kdivkz(K_O.data(), PO, gO, bandO);
+    });
   };
 
   // Et = E; HnkThread(E, Et); FurThread(Et, Dir=-1), with the optical rows of IS and IO, Fl, Or,
-  // Imax and Energy. Both stages do the same.
+  // Imax and Energy, on all rows. Both stages do the same; nrNl is set from the result.
   auto optical_diagnostics = [&](Snapshot* snap) {
-    hankel_spectral(HO, HankelInput{E_O.data(), nullptr, 0.0, nrO}, W_O.data(), nrO, nqO, nullptr, nullptr);
+    timed(pt.hnkO, [&] {
+      hankel_spectral(HO, HankelInput{E_O.data(), nullptr, 0.0, nrO}, W_O.data(), nrO, nqO, hcO, nullptr);
+    });
     if (snap) {
-      radial_power(W_O.data(), nrO, nqO, gO, intSp);
-      for (int p = tf.opt_lin_start; p < nqO; ++p) {
-        const int itt = nqO + p;
-        snap->is.f(bandO.fr[itt]).d(2.0 * intSp[p]).nl();
-        snap->io.f(bandO.fr[itt]).d(W_O[p].real()).d(W_O[p].imag()).nl();
-      }
+      timed(pt.io, [&] {
+        radial_power(W_O.data(), nrO, nqO, gO, intSp);
+        for (int p = tf.opt_lin_start; p < nqO; ++p) {
+          const int itt = nqO + p;
+          snap->is.f(bandO.fr[itt]).d(2.0 * intSp[p]).nl();
+          snap->io.f(bandO.fr[itt]).d(W_O[p].real()).d(W_O[p].imag()).nl();
+        }
+      });
     }
 
-    spectra_to_time(W_O.data(), nrO, nqO, Et_O.data(), ntO, fftO);
+    timed(pt.fft, [&] { spectra_to_time(W_O.data(), nrO, nqO, Et_O.data(), ntO, fftO); });
 
     row_stats(Et_O.data(), nrO, ntO, sumsq, maxsq);
     for (int i = 0; i < nrO; ++i) {
@@ -324,7 +364,9 @@ RunStatus run_simulation(const RunConfig& cfg) {
       if (snap) snap->fl.d(gO.r1[i]).d(Fl[i]).nl();
     }
     if (snap) {
-      for (int t = 0; t < ntO; ++t) snap->orr.d((t * tf.dt + tf.tmin) * c::t0 * 1e15).d(Et_O[t]).d(0.0).nl();
+      timed(pt.io, [&] {
+        for (int t = 0; t < ntO; ++t) snap->orr.d((t * tf.dt + tf.tmin) * c::t0 * 1e15).d(Et_O[t]).d(0.0).nl();
+      });
     }
 
     const double ImaxO = maxsq[0];
@@ -340,6 +382,8 @@ RunStatus run_simulation(const RunConfig& cfg) {
     std::printf(" %14.7g Energy = %.15g\n", static_cast<double>(static_cast<float>(z * c::Ldifr)), Energy);
     fEnergy.d(z * c::Ldifr).d(Energy).nl();
     fEnergy.flush();
+
+    nrNl = nonlinear_rows(maxsq, Imax, cfg.nl_eps, ph.I0, cfg.nl_pad);
   };
 
   // Nemax and Den after the first RK stage, Ne(r) into the snapshot, which is then closed.
@@ -372,6 +416,8 @@ RunStatus run_simulation(const RunConfig& cfg) {
   // After every z step of either stage: true when the run has to stop (status Finished at z_max).
   auto end_of_step = [&](double wall0) -> bool {
     const double step_time = omp_get_wtime() - wall0;
+    std::printf(" phases hnkT %.3f hnkO %.3f nl %.3f fft %.3f lin %.3f io %.3f R_nl %d\n", pt.hnkT, pt.hnkO, pt.nl,
+                pt.fft, pt.lin, pt.io, nrNl);
     std::printf(" step time %.3f s\n", step_time);
     std::fflush(stdout);
     max_step_time = std::max(max_step_time, step_time);
@@ -407,6 +453,7 @@ RunStatus run_simulation(const RunConfig& cfg) {
   if (z < z_opt_end) std::printf(" --- Optical stage up to %g cm ---\n", c::opt_stage_end);
   while (!stopped && z < z_opt_end) {
     const double wall0 = omp_get_wtime();
+    pt = PhaseTimes{};
     dz = static_cast<double>(0.02f) * c::focus / c::Ldifr * 1 / Imax;
     std::printf(" Step %lld\n", iz);
 
@@ -416,36 +463,40 @@ RunStatus run_simulation(const RunConfig& cfg) {
     if (z >= z_flag) {
       z_flag = z_flag + (z < c::snap_dense_begin / k0a0a0 ? c::snap_sparse : c::snap_opt_dense) / k0a0a0;
       z_pos = static_cast<int>(z * k0a0a0 * 1e2);
-      snap = open_snapshot(out, z_pos);
-      // No THz field yet: its rows of IS and IO are zeros.
-      for (int q = 1; q < nqT; ++q) {
-        const float fr = bandT.fr[nqT + q];
-        snap->is.f(fr).d(0.0).nl();
-        snap->io.f(fr).d(0.0).nl();
-      }
+      timed(pt.io, [&] {
+        snap = open_snapshot(out, z_pos);
+        // No THz field yet: its rows of IS and IO are zeros.
+        for (int q = 1; q < nqT; ++q) {
+          const float fr = bandT.fr[nqT + q];
+          snap->is.f(fr).d(0.0).nl();
+          snap->io.f(fr).d(0.0).nl();
+        }
+      });
     }
 
     optical_diagnostics(snap.get());
 
     // First RK stage
     run_nonlinear_opt(dz);
-    plasma_diagnostics(snap, z_pos, 0.0);
+    timed(pt.io, [&] { plasma_diagnostics(snap, z_pos, 0.0); });
     to_kr_and_divide_opt();
 
-    // Second RK stage at E + k/2
-    hankel_spectral(HO, HankelInput{E_O.data(), K_O.data(), .5, nrO}, W_O.data(), nrO, nqO, nullptr, nullptr);
-    spectra_to_time(W_O.data(), nrO, nqO, Et_O.data(), ntO, fftO);
+    // Second RK stage at E + k/2, on the rows of the nonlinear response
+    timed(pt.hnkO, [&] {
+      hankel_spectral(HO, HankelInput{E_O.data(), K_O.data(), .5, nrO}, W_O.data(), nrNl, nqO, hcO, nullptr);
+    });
+    timed(pt.fft, [&] { spectra_to_time(W_O.data(), nrNl, nqO, Et_O.data(), ntO, fftO); });
     run_nonlinear_opt(dz);
     to_kr_and_divide_opt();
 
-    add_to(E_O.data(), K_O.data(), nO);
+    timed(pt.lin, [&] { add_to(E_O.data(), K_O.data(), nO); });
 
     z = z + dz;
     iz = iz + 1;
     std::fill(neMax.begin(), neMax.end(), 0.0);
 
     // LinThread_opt
-    linear_step(E_O.data(), PO, gO, bandO, tf.opt_lin_start, dz);
+    timed(pt.lin, [&] { linear_step(E_O.data(), PO, gO, bandO, tf.opt_lin_start, dz); });
 
     stopped = end_of_step(wall0);
   }
@@ -454,6 +505,7 @@ RunStatus run_simulation(const RunConfig& cfg) {
   if (!stopped) std::printf(" --- Start propagation ---\n");
   while (!stopped) {
     const double wall0 = omp_get_wtime();
+    pt = PhaseTimes{};
     dz = static_cast<double>(0.02f) * c::focus / c::Ldifr * 1 / Imax;
     std::printf(" Step %lld\n", iz);
 
@@ -467,7 +519,7 @@ RunStatus run_simulation(const RunConfig& cfg) {
         z_flag = z_flag + c::snap_dense / k0a0a0;
       }
       z_pos = static_cast<int>(z * k0a0a0 * 1e2);
-      snap = open_snapshot(out, z_pos);
+      timed(pt.io, [&] { snap = open_snapshot(out, z_pos); });
     }
     // kw_THz: with every snapshot, or once per target of cfg.kw_z_cm (several targets passed in one step
     // give one file).
@@ -477,51 +529,70 @@ RunStatus run_simulation(const RunConfig& cfg) {
       ++kw_next;
     }
     if (kw_due) {
-      const int kw_pos = static_cast<int>(z * k0a0a0 * 1e2);
-      if (cfg.kw_format == KwFormat::Binary)
-        write_kw_binary(kw_file(out, kw_pos, cfg.kw_format), E_T.data(), nrT, nqT, gT, bandT, z * k0a0a0);
-      else
-        write_kw_text(kw_file(out, kw_pos, cfg.kw_format), E_T.data(), nrT, nqT, gT, bandT);
+      timed(pt.io, [&] {
+        const int kw_pos = static_cast<int>(z * k0a0a0 * 1e2);
+        if (cfg.kw_format == KwFormat::Binary)
+          write_kw_binary(kw_file(out, kw_pos, cfg.kw_format), E_T.data(), nrT, nqT, gT, bandT, z * k0a0a0);
+        else
+          write_kw_text(kw_file(out, kw_pos, cfg.kw_format), E_T.data(), nrT, nqT, gT, bandT);
+      });
     }
     const bool fluence = static_cast<bool>(snap);
 
-    // Ebuf = E_THz; HnkThread(E_THz, Ebuf)
-    hankel_spectral(HT, HankelInput{E_T.data(), nullptr, 0.0, nrT}, B_T.data(), fluence ? nrT : nrO, nqT,
-                    PT.cut.data(), nullptr);
+    // Ebuf = E_THz; HnkThread(E_THz, Ebuf) on the first `rows` rows.
+    auto thz_to_r = [&](int rows) {
+      timed(pt.hnkT, [&] {
+        hankel_spectral(HT, HankelInput{E_T.data(), nullptr, 0.0, nrT}, B_T.data(), rows, nqT, hcT, nullptr);
+      });
+    };
+    // Snapshot steps need all rows for the THz rows of IS and IO, which come before the optical rows;
+    // otherwise only the rows of the nonlinear response, known after the optical diagnostics.
     if (fluence) {
-      radial_power(B_T.data(), nrT, nqT, gT, intSp);
-      for (int q = 1; q < nqT; ++q) {
-        const int itt = nqT + q;
-        snap->is.f(bandT.fr[itt]).d(2.0 * intSp[q]).nl();
-        snap->io.f(bandT.fr[itt]).d(B_T[q].real()).d(B_T[q].imag()).nl();
-      }
+      thz_to_r(nrT);
+      timed(pt.io, [&] {
+        radial_power(B_T.data(), nrT, nqT, gT, intSp);
+        for (int q = 1; q < nqT; ++q) {
+          const int itt = nqT + q;
+          snap->is.f(bandT.fr[itt]).d(2.0 * intSp[q]).nl();
+          snap->io.f(bandT.fr[itt]).d(B_T[q].real()).d(B_T[q].imag()).nl();
+        }
+      });
     }
 
     optical_diagnostics(snap.get());
+    if (!fluence) thz_to_r(nrNl);
 
     // First RK stage, field at z
     run_nonlinear(dz, z);
-    plasma_diagnostics(snap, z_pos, dc_field_kV(z * c::Ldifr));
+    timed(pt.io, [&] { plasma_diagnostics(snap, z_pos, dc_field_kV(z * c::Ldifr)); });
     to_kr_and_divide();
 
-    // Second RK stage at E + k/2: Ebuf = E_THz + .5*k_THz, Et = E + .5*k
-    hankel_spectral(HT, HankelInput{E_T.data(), K_T.data(), .5, nrT}, B_T.data(), nrO, nqT, PT.cut.data(), nullptr);
-    hankel_spectral(HO, HankelInput{E_O.data(), K_O.data(), .5, nrO}, W_O.data(), nrO, nqO, nullptr, nullptr);
-    spectra_to_time(W_O.data(), nrO, nqO, Et_O.data(), ntO, fftO);
+    // Second RK stage at E + k/2: Ebuf = E_THz + .5*k_THz, Et = E + .5*k, on the rows of the nonlinear response
+    timed(pt.hnkT, [&] {
+      hankel_spectral(HT, HankelInput{E_T.data(), K_T.data(), .5, nrT}, B_T.data(), nrNl, nqT, hcT, nullptr);
+    });
+    timed(pt.hnkO, [&] {
+      hankel_spectral(HO, HankelInput{E_O.data(), K_O.data(), .5, nrO}, W_O.data(), nrNl, nqO, hcO, nullptr);
+    });
+    timed(pt.fft, [&] { spectra_to_time(W_O.data(), nrNl, nqO, Et_O.data(), ntO, fftO); });
     // The Fortran window sets DC_Field once per step; the smooth profiles are sampled at the midpoint z + dz/2.
     run_nonlinear(dz, c::dc_profile == 4 ? z : z + 0.5 * dz);
     to_kr_and_divide();
 
-    add_to(E_O.data(), K_O.data(), nO);
-    add_to(E_T.data(), K_T.data(), nT);
+    timed(pt.lin, [&] {
+      add_to(E_O.data(), K_O.data(), nO);
+      add_to(E_T.data(), K_T.data(), nT);
+    });
 
     z = z + dz;
     iz = iz + 1;
     std::fill(neMax.begin(), neMax.end(), 0.0);
 
     // LinThread
-    linear_step(E_T.data(), PT, gT, bandT, 0, dz);
-    linear_step(E_O.data(), PO, gO, bandO, tf.opt_lin_start, dz);
+    timed(pt.lin, [&] {
+      linear_step(E_T.data(), PT, gT, bandT, 0, dz);
+      linear_step(E_O.data(), PO, gO, bandO, tf.opt_lin_start, dz);
+    });
 
     stopped = end_of_step(wall0);
   }

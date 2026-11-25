@@ -68,6 +68,11 @@ struct Propagator {
   AlignedArray<double> kplasma;  // [nr][nq]
   std::vector<int> cut;          // rows i >= cut[q] have kr_filter exactly 0
   std::vector<double> wfilter;   // exp(-(w/omega_max)^20)
+  // Bins q >= qmax have wfilter exactly 0. hcut[q] = 0 for those, otherwise min(cut[q], rows with kz^2 > 0):
+  // kplasma*kr_filter*wfilter is exactly 0 in rows i >= hcut[q], so K(w,kr) is 0 there, and E(w,kr), which
+  // starts at 0 there (E_THz everywhere, the optical field outside the band of the input pulse), stays 0.
+  int qmax = 0;
+  std::vector<int> hcut;
 };
 
 Propagator make_propagator(const Band& band, const RadialGrid& grid, double vg, double omega_max);

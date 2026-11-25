@@ -9,6 +9,7 @@ set(UPPE_TESTS
   test_kw_output
   test_simulation_smoke
   test_checkpoint
+  test_nl_rows
 )
 
 foreach(t IN LISTS UPPE_TESTS)
@@ -31,3 +32,5 @@ add_test(NAME simulation_smoke COMMAND test_simulation_smoke data WORKING_DIRECT
 set_tests_properties(simulation_smoke PROPERTIES TIMEOUT 1800)
 add_test(NAME checkpoint COMMAND test_checkpoint data WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 set_tests_properties(checkpoint PROPERTIES TIMEOUT 1800)
+add_test(NAME nl_rows COMMAND test_nl_rows data WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+set_tests_properties(nl_rows PROPERTIES TIMEOUT 1800)

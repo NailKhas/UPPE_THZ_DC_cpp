@@ -38,6 +38,8 @@ void usage() {
       "  --kw-z <a,b,...>      write res/kw_THz only at these z (cm, ascending, >= 71), once each, on the first step\n"
       "                        with z >= the point (default: with every THz-stage snapshot)\n"
       "  --kw-format bin|text  res/kw_THz format: bin = Z<pos>.kwb, float32 |E|^2 (default), text = Fortran-like Z<pos>.dat\n"
+      "  --nl-eps <x>          compute the nonlinear response only on the rows r with max_t E^2 > x*Imax, plus a margin\n"
+      "                        (default 1e-12; 0 = on all rows)\n"
       "Exit code: 0 when --z-max is reached, %d when the run stopped early, 1 on error.\n",
       kExitContinue);
 }
@@ -109,6 +111,10 @@ int main(int argc, char** argv) {
           cfg.kw_format = uppe::KwFormat::Text;
         else
           throw std::runtime_error("--kw-format must be bin or text");
+      } else if (opt == "--nl-eps") {
+        const double x = std::stod(value());
+        if (!(x >= 0.0 && x < 1.0)) throw std::runtime_error("--nl-eps must be in [0, 1)");
+        cfg.nl_eps = x;
       } else if (opt == "-h" || opt == "--help") {
         usage();
         return 0;

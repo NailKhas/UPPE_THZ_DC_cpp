@@ -3,6 +3,7 @@
 #include "check.hpp"
 #include "grids.hpp"
 #include "hankel.hpp"
+#include "propagation.hpp"
 #include "reference.hpp"
 
 using namespace uppe;
@@ -134,6 +135,40 @@ int main() {
     }
     CHECK(untouched);
     CHECK(zeroOrExact);
+  }
+
+  // Propagator::hcut as sumCut (kr -> r of a field that is 0 beyond hcut) and as outCut (r -> kr followed
+  // by kdivkz) gives the full transform, on the THz grid and with bins beyond qmax.
+  {
+    const TimeFreq tf = make_time_freq(4096);
+    const RadialGrid g = make_radial(roots, nR, 10, RadialKind::THz);
+    const Band bT = make_band(tf.ntT, tf.dw_THz, tf.wmin_THz);
+    for (const double omega_max : {c::omega_max_THz, bT.freqs[bT.nq() + bT.nq() / 2]}) {
+      const Propagator P = make_propagator(bT, g, 1.0003, omega_max);
+      const int m = P.nq;
+      const std::size_t sz = static_cast<std::size_t>(n) * m;
+      int skipped = 0;
+      std::vector<cplx> e(sz), full(sz), cut(sz, cplx(777.0, 777.0));
+      for (int k = 0; k < n; ++k)
+        for (int q = 0; q < m; ++q) {
+          const bool kept = k < P.hcut[q];
+          skipped += !kept;
+          e[static_cast<std::size_t>(k) * m + q] = kept ? rng.cuniform(1.0) : cplx(0.0, 0.0);
+        }
+      CHECK(skipped > 0);
+      hankel_spectral(H, HankelInput{e.data(), nullptr, 0.0, n}, full.data(), n, m, nullptr, nullptr);
+      hankel_spectral(H, HankelInput{e.data(), nullptr, 0.0, n}, cut.data(), n, m, P.hcut.data(), nullptr);
+      CHECK(test::rel_err(cut.data(), full.data(), sz) < 1e-14);
+
+      const int rows = 7;
+      std::vector<cplx> src(sz, cplx(0.0, 0.0)), kfull(sz), kcut(sz, cplx(777.0, 777.0));
+      for (std::size_t j = 0; j < static_cast<std::size_t>(rows) * m; ++j) src[j] = rng.cuniform(1.0);
+      hankel_spectral(H, HankelInput{src.data(), nullptr, 0.0, rows}, kfull.data(), n, m, nullptr, nullptr);
+      hankel_spectral(H, HankelInput{src.data(), nullptr, 0.0, rows}, kcut.data(), n, m, nullptr, P.hcut.data());
+      kdivkz(kfull.data(), P, g, bT);
+      kdivkz(kcut.data(), P, g, bT);
+      CHECK(test::rel_err(kcut.data(), kfull.data(), sz) < 1e-14);
+    }
   }
 
   // Dense real transform (FirstStep).

@@ -1,0 +1,168 @@
+name: Bench
+
+run-name: "Bench ${{ github.ref_name }} against ${{ inputs.base_sha || 'dd48277' }}, ${{ inputs.steps || '10' }} steps from ${{ inputs.ckpt_name || 'ckpt-f75-kw-seg14' }}"
+
+# Step time and results of the current code against a base commit, without a full run: both resume from the
+# same checkpoint of a simulate.yml chain on one runner and make a few steps.
+#   A: base commit;  B: current code, --nl-eps 0 (exact spectral cuts only);  C: current code, --nl-eps <nl_eps>.
+# tools/bench_compare.py puts the step and phase times and the differences of the fields and of the scalar
+# files from A into the job summary.
+# workflow_dispatch needs this file on the default branch; a pushed tag bench-* runs it from any commit
+# with the default inputs.
+on:
+  workflow_dispatch:
+    inputs:
+      ckpt_run_id:
+        description: "Run id of the simulate.yml segment whose checkpoint artifact is resumed"
+        required: true
+        default: "45524440849"
+      ckpt_name:
+        description: "Checkpoint artifact name"
+        required: true
+        default: "ckpt-f75-kw-seg14"
+      base_sha:
+        description: "Base commit (the code the checkpoint chain runs)"
+        required: true
+        default: "dd48277ea031b315330244ef9bbdf276f32cec82"
+      steps:
+        description: "z steps per run"
+        required: true
+        default: "10"
+      nl_eps:
+        description: "--nl-eps of run C"
+        required: true
+        default: "1e-12"
+      kw_z:
+        description: "--kw-z of the chain (the checkpoint stores its schedule)"
+        required: true
+        default: "77,80,85"
+      z_max:
+        description: "--z-max of the chain, cm"
+        required: true
+        default: "85.5"
+      focus:
+        description: "Focal distance of the chain, cm"
+        required: true
+        default: "75"
+      zsic:
+        description: "zsic of the chain, cm"
+        required: true
+        default: "56.25"
+      dc_profile:
+        description: "DC profile of the chain"
+        required: true
+        default: "WINDOW"
+  push:
+    tags: ["bench-*"]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      CKPT_RUN_ID: ${{ inputs.ckpt_run_id || '45524440849' }}
+      CKPT_NAME: ${{ inputs.ckpt_name || 'ckpt-f75-kw-seg14' }}
+      BASE_SHA: ${{ inputs.base_sha || 'dd48277ea031b315330244ef9bbdf276f32cec82' }}
+      STEPS: ${{ inputs.steps || '10' }}
+      NL_EPS: ${{ inputs.nl_eps || '1e-12' }}
+      KW_Z: ${{ inputs.kw_z || '77,80,85' }}
+      Z_MAX: ${{ inputs.z_max || '85.5' }}
+      FOCUS: ${{ inputs.focus || '75' }}
+      ZSIC: ${{ inputs.zsic || '56.25' }}
+      DC_PROFILE: ${{ inputs.dc_profile || 'WINDOW' }}
+      OMP_PROC_BIND: close
+      OMP_PLACES: cores
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/share/swift /usr/local/share/powershell || true
+          df -h .
+
+      - name: Install FFTW3 and OpenBLAS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfftw3-dev libopenblas-dev
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install numpy
+        run: python -m pip install numpy
+
+      - name: Build current and base
+        run: |
+          git worktree add base "$BASE_SHA"
+          echo "Current: $(git rev-parse HEAD), base: $(git -C base rev-parse HEAD)"
+          for dir in . base; do
+            (cd "$dir" &&
+              cmake --preset fftw-openblas -DUPPE_BUILD_TESTS=OFF -DUPPE_FOCUS_CM="$FOCUS" -DUPPE_ZSIC_CM="$ZSIC" \
+                -DUPPE_DC_PROFILE="$DC_PROFILE" &&
+              cmake --build --preset fftw-openblas -j "$(nproc)")
+          done
+
+      - name: Download checkpoint
+        run: |
+          gh run download "$CKPT_RUN_ID" -n "$CKPT_NAME" -D ckpt
+          ls -l ckpt ckpt/res
+          iz=$(python -c "import sys; sys.path.insert(0, 'tools'); import bench_compare as b; \
+            h = b.read_fields(__import__('pathlib').Path('ckpt/checkpoint.bin'))[0]; print(int(h['iz']))")
+          echo "Checkpoint at step $iz, runs stop at step $((iz + STEPS))"
+          echo "STOP=$((iz + STEPS))" >> "$GITHUB_ENV"
+
+      - name: Run A, B, C
+        run: |
+          nproc
+          free -h
+          run() {
+            local label=$1 exe=$2
+            shift 2
+            mkdir -p "$label/res"
+            cp ckpt/res/*.dat "$label/res/"
+            set +e
+            "$exe" --data-dir data --out-dir "$label" --z-max "$Z_MAX" --threads "$(nproc)" \
+              --resume ckpt/checkpoint.bin --checkpoint "$label/out.bin" --max-steps "$STOP" \
+              --kw-z "$KW_Z" --kw-format bin "$@" 2>&1 | tee "$label/log.txt"
+            local code=${PIPESTATUS[0]}
+            set -e
+            # Snapshots and kw_THz are not compared; they would fill the disk over three runs.
+            rm -rf "$label"/res/{IS,Fl,Or,Ne,IO,kw_THz}
+            if [ "$code" != 75 ]; then echo "::error::run $label exited with code $code"; exit 1; fi
+          }
+          run runA base/build/fftw-openblas/uppe_thz_dc
+          run runB build/fftw-openblas/uppe_thz_dc --nl-eps 0
+          run runC build/fftw-openblas/uppe_thz_dc --nl-eps "$NL_EPS"
+          df -h .
+
+      - name: Compare
+        run: |
+          python tools/bench_compare.py "A base ${BASE_SHA:0:7}=runA" "B nl-eps 0=runB" "C nl-eps $NL_EPS=runC" \
+            --out summary.md
+          {
+            echo "## Bench: $GITHUB_SHA against $BASE_SHA, checkpoint $CKPT_NAME (run $CKPT_RUN_ID)"
+            echo
+            cat summary.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-${{ github.run_id }}
+          path: |
+            summary.md
+            run*/log.txt
+            run*/res/*.dat
+          if-no-files-found: ignore
+          retention-days: 30
