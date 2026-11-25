@@ -24,6 +24,10 @@ on:
           - bin
           - text
         default: bin
+      nl_eps:
+        description: "--nl-eps: nonlinear response on the rows above nl_eps*Imax (empty = program default; 0 = all rows; code before f75-fast has no such option)"
+        required: false
+        default: ""
       focus:
         description: "Focal distance, cm (compiled in; pinned for the whole chain)"
         required: true
@@ -93,6 +97,7 @@ jobs:
       Z_MAX: ${{ inputs.z_max }}
       KW_Z: ${{ inputs.kw_z }}
       KW_FORMAT: ${{ inputs.kw_format }}
+      NL_EPS: ${{ inputs.nl_eps }}
       FOCUS: ${{ inputs.focus }}
       ZSIC: ${{ inputs.zsic }}
       DC_PROFILE: ${{ inputs.dc_profile }}
@@ -121,6 +126,7 @@ jobs:
           list='^[0-9]+(\.[0-9]+)?(,[0-9]+(\.[0-9]+)?)*$'
           [ "$KW_Z" = all ] || [[ "$KW_Z" =~ $list ]] || { echo "::error::bad kw_z '$KW_Z' (e.g. 77,80,85 or all)"; exit 1; }
           [[ "$KW_FORMAT" = bin || "$KW_FORMAT" = text ]] || { echo "::error::bad kw_format '$KW_FORMAT'"; exit 1; }
+          [ -z "$NL_EPS" ] || [[ "$NL_EPS" =~ ^[0-9]+(\.[0-9]+)?([eE]-?[0-9]+)?$ ]] || { echo "::error::bad nl_eps '$NL_EPS'"; exit 1; }
           [[ "$FOCUS" =~ $num ]] || { echo "::error::bad focus '$FOCUS'"; exit 1; }
           [[ "$ZSIC" =~ $num ]] || { echo "::error::bad zsic '$ZSIC'"; exit 1; }
           awk -v a="$ZSIC" -v b="$FOCUS" 'BEGIN { exit !(a < b) }' || { echo "::error::zsic must be less than focus"; exit 1; }
@@ -187,6 +193,8 @@ jobs:
           if [ "$Z_MAX" != none ]; then zmax=(--z-max "$Z_MAX"); fi
           kw=(--kw-format "$KW_FORMAT")
           if [ "$KW_Z" != all ]; then kw+=(--kw-z "$KW_Z"); fi
+          nl=()
+          if [ -n "$NL_EPS" ]; then nl=(--nl-eps "$NL_EPS"); fi
           log="run/log_seg$SEG2.txt"
 
           bash ci/stream_results.sh run "$SEG2" 600 > stream.log 2>&1 &
@@ -195,7 +203,7 @@ jobs:
           set +e
           timeout --preserve-status --signal=TERM --kill-after=5m "$((limit + 10))m" \
             ./build/fftw-openblas/uppe_thz_dc --data-dir data --out-dir run "${zmax[@]}" --threads "$(nproc)" \
-            --wall-limit-min "$limit" --min-free-gb "$MIN_FREE_GB" --checkpoint run/checkpoint.bin "${resume[@]}" "${kw[@]}" \
+            --wall-limit-min "$limit" --min-free-gb "$MIN_FREE_GB" --checkpoint run/checkpoint.bin "${resume[@]}" "${kw[@]}" "${nl[@]}" \
             2>&1 | tee "$log"
           code=${PIPESTATUS[0]}
           set -e
@@ -253,7 +261,7 @@ jobs:
             exit 0
           fi
           gh workflow run simulate.yml --ref "$GITHUB_REF_NAME" \
-            -f z_max="$Z_MAX" -f kw_z="$KW_Z" -f kw_format="$KW_FORMAT" -f focus="$FOCUS" -f zsic="$ZSIC" -f dc_profile="$DC_PROFILE" -f tag="$TAG" -f segment="$next" -f resume_run_id="$GITHUB_RUN_ID" \
+            -f z_max="$Z_MAX" -f kw_z="$KW_Z" -f kw_format="$KW_FORMAT" -f nl_eps="$NL_EPS" -f focus="$FOCUS" -f zsic="$ZSIC" -f dc_profile="$DC_PROFILE" -f tag="$TAG" -f segment="$next" -f resume_run_id="$GITHUB_RUN_ID" \
             -f code_sha="$CODE_SHA" -f budget_minutes="$BUDGET" -f max_segments="$MAX_SEGMENTS" -f run_tests="$RUN_TESTS"
           echo "Dispatched segment $next"
 
